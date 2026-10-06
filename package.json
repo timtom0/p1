@@ -1,0 +1,29 @@
+{
+  "name": "p1",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Local-first, browser-based page layout editor rendered with HTML/CSS",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
+    "test:all": "npm run test && npm run test:visual",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.63.0",
+    "eslint": "^9.17.0",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  }
+}

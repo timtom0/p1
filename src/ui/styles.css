@@ -1,0 +1,751 @@
+/*
+ * Three kinds of CSS live here, and the distinction matters:
+ *
+ *  - Editor chrome (.app, .toolbar, .inspector, .ruler) - ordinary UI
+ *    styling.
+ *  - The document surface (.viewport, .canvas, .pages, .page, .objects,
+ *    .p1-object). These rules are load-bearing for the rendering architecture.
+ *  - The overlay, which is neither: it is screen-space editor chrome that reports
+ *    document geometry, so it lives outside the zoom transform (see below).
+ *  - The status bar and rulers, which are chrome that *reflects* document
+ *    coordinates and therefore must not be styled as if they were document.
+ */
+
+:root {
+  --chrome-bg: #1c1d22;
+  --chrome-fg: #e6e7ea;
+  --chrome-muted: #8b8f99;
+  --chrome-border: #2e3038;
+  --accent: #4f7cff;
+  --viewport-bg: #14151a;
+  --ruler-bg: #1c1d22;
+  --ruler-tick: #45474f;
+  --ruler-label: #8b8f99;
+  --ruler-size: 22px;
+  /* Overlay chrome. Named so the document palette and the editor palette stay
+     distinct — selection colour must never reach the document. */
+  --selection: #4f7cff;
+  --selection-hover: #6f8fff;
+  --snap: #ff5c8a;
+  --danger: #ff6b6b;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font:
+    13px/1.5 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+.app {
+  display: grid;
+  /*
+   * Row/column 1 are the rulers, which frame the viewport. The document surface
+   * sits in the middle and is the only scroll container.
+   */
+  grid-template-columns: var(--ruler-size) 1fr 300px;
+  grid-template-rows: auto var(--ruler-size) 1fr auto;
+  grid-template-areas:
+    'toolbar toolbar  toolbar'
+    'corner  h-ruler  inspector'
+    'v-ruler surface  inspector'
+    'status  status   status';
+  height: 100%;
+}
+
+.surface {
+  grid-area: surface;
+  /* The overlay is positioned against this box, so it is also what clips the
+     selection chrome to the document surface. */
+  position: relative;
+  overflow: hidden;
+  /*
+   * Flex, so `.viewport` fills this box rather than sizing to its own content.
+   *
+   * As a plain block child it took its height from the canvas — which meant
+   * `overflow: auto` had nothing to scroll and the whole page stack became
+   * unreachable. A one-line layout rule, and the failure was total silence.
+   */
+  display: flex;
+}
+
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.toolbar__brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.toolbar__note {
+  color: var(--chrome-muted);
+  font-size: 12px;
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__zoom,
+.toolbar__history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar__shapes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * The document commands. A separate group from the shape tools because they are not tools:
+ * they act on the file rather than on the page, and a separator makes that legible at a
+ * glance. Grouped with a `role="group"` and a label so a screen reader announces the change
+ * in kind rather than three more unrelated buttons.
+ */
+.toolbar__document,
+.toolbar__layers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid var(--chrome-border);
+}
+
+/*
+ * A layer button with nothing selected.
+ *
+ * `aria-disabled` rather than `disabled`, deliberately: `disabled` removes the button from
+ * the tab order, so a user tabbing through the toolbar would find the four layer buttons
+ * simply missing, with no way to discover the shortcut. The click handler still runs the
+ * command and the model's `isNoop` drops it, so the attribute is honest feedback rather than a
+ * second gate that could disagree with the model about what is possible.
+ */
+.toolbar__layers button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
+ * The armed tool. Driven from `Editor.armedShapeKind` rather than a local variable, so
+ * the button cannot claim a tool is active when the editor has disarmed it — a pressed
+ * button that does nothing is worse than no button. `--selection` is the editor's
+ * highlight, which never reaches the document palette (see the file header).
+ */
+.toolbar__shapes button[aria-pressed='true'] {
+  border-color: var(--selection);
+  background: #2b3350;
+  color: #dce4ff;
+}
+
+.toolbar__zoom button,
+.toolbar__shapes button,
+.toolbar__history button,
+.toolbar__document button,
+.toolbar__layers button {
+  min-width: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  background: #24262d;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar__zoom button:hover,
+.toolbar__history button:hover:not(:disabled) {
+  background: #2f323b;
+}
+
+/*
+ * A disabled history button is dimmed rather than hidden.
+ *
+ * Hiding would make the toolbar reflow every time history depth changed, which is
+ * the kind of chrome jitter that makes an editor feel cheap. The button stays put
+ * and simply stops accepting the click.
+ */
+.toolbar__history button:disabled {
+  color: var(--chrome-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.toolbar__zoom-value {
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-muted);
+}
+
+/* ----------------------------------------------------------------- rulers */
+
+.ruler-corner {
+  grid-area: corner;
+  border-right: 1px solid var(--chrome-border);
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--ruler-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--chrome-muted);
+  font-size: 9px;
+}
+
+.ruler {
+  background: var(--ruler-bg);
+  overflow: hidden;
+}
+
+.ruler--horizontal {
+  grid-area: h-ruler;
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.ruler--vertical {
+  grid-area: v-ruler;
+  border-right: 1px solid var(--chrome-border);
+}
+
+.ruler canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* --------------------------------------------------------- document surface */
+
+.viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  background: var(--viewport-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  /* Space pan and middle-drag pan. */
+  cursor: default;
+  touch-action: none;
+}
+
+.viewport[data-panning='true'] {
+  cursor: grabbing;
+}
+
+/*
+ * The canvas is the scrollable spacer. The viewport writes `content × zoom` onto
+ * it so the scrollbars reflect the true extent of the document. It carries no
+ * transform of its own — the stack below it does.
+ */
+.canvas {
+  position: relative;
+  flex: none;
+  margin: 24px;
+}
+
+/*
+ * The page stack is the ONLY element zoom touches.
+ *
+ * `transform-origin: 0 0` so scaling grows the document rightwards/downwards
+ * from the top-left of the first page, which is what keeps the viewport's
+ * coordinate conversion and anchored zoom simple: one origin, one multiply.
+ *
+ * Width/height are not set here. Each `.page` sizes itself from the document's
+ * page size, and the stack's own box is the union of them, so page layout stays a
+ * CSS concern rather than arithmetic in JS.
+ */
+.pages {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+/*
+ * The paper's edge, drawn on the canvas rather than the page. A border does not
+ * affect any page's layout box, so page elements stay exactly the document size
+ * while still reading as sheets of paper.
+ */
+.canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  pointer-events: none;
+}
+
+/*
+ * Each page is sized in document px and positioned in document px by
+ * `DocumentView`. `overflow: hidden` clips content to the page box: this *is* page
+ * clipping, in one line of CSS. There is no clipper in this codebase.
+ */
+.page {
+  position: absolute;
+  overflow: hidden;
+}
+
+.objects {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * Every document object is one absolutely positioned element. `box-sizing:
+ * border-box` means an `inside` stroke grows inward from the model's declared
+ * width/height instead of expanding it.
+ */
+.p1-object {
+  position: absolute;
+  box-sizing: border-box;
+  transform-origin: 50% 50%;
+}
+
+/* ------------------------------------------------------------------- images */
+
+/*
+ * An image object is a wrapper `div`, not a bare `<img>`.
+ *
+ * Measured, and the reason is not geometry -- the two are identical for size, transform
+ * and painted box (ADR 0006 PROBE AA). An `<img>` is a *replaced element*: it has no
+ * content box in which descendants render, so a bare `<img>` has nowhere to put a
+ * "missing image" state. Keeping `.p1-object` a div means an image is addressable,
+ * measurable and transformable by exactly the same code as every other object type.
+ */
+.p1-image-content {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Suppresses Chromium's drag-the-file-out-of-the-page gesture. */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/*
+ * The placeholder: a marked, visible box for an asset that is not showing pixels.
+ *
+ * This is load-bearing rather than decorative. Measured (ADR 0006 PROBE Z): an image with
+ * no `src`, an unreachable URL, or non-image data still reports `complete === true`,
+ * still occupies its full authored box, and is still hit-testable across all of it. So
+ * **nothing about the box or the hit region distinguishes a broken image from a working
+ * one** -- the application has to say so, or a missing asset is indistinguishable from a
+ * loaded one.
+ *
+ * Drawn on the wrapper rather than the `<img>` so it shows *through* the image: a broken
+ * image paints nothing, and `object-fit` has no effect on a box with no content.
+ *
+ * `display: none` is reserved for `visible: false`, which is a different thing with no box
+ * at all -- so a deliberately hidden object can never be mistaken for a missing asset.
+ */
+.p1-image[data-asset-state='idle'],
+.p1-image[data-asset-state='loading'],
+.p1-image[data-asset-state='error'] {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(127, 127, 127, 0.14) 0 6px,
+      rgba(127, 127, 127, 0.06) 6px 12px
+    );
+  outline: 1px dashed var(--danger);
+  outline-offset: -1px;
+}
+
+/* No pixels to cover, so the placeholder shows through unoccluded. */
+.p1-image[data-asset-state='error'] .p1-image-content,
+.p1-image[data-asset-state='idle'] .p1-image-content {
+  visibility: hidden;
+}
+
+/* A loaded image needs no chrome at all. */
+.p1-image[data-asset-state='loaded'] {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------- status bar */
+
+.status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--chrome-border);
+  background: var(--chrome-bg);
+  color: var(--chrome-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The dirty indicator.
+ *
+ * Quiet when clean, and marked when dirty. The attribute is the machine-readable half --
+ * `data-dirty` -- and it is what a browser test asserts, so the visual treatment and the
+ * tested value cannot drift apart: both are written from one `DocumentSession.isDirty` read.
+ *
+ * Deliberately *not* styled from anything else. No class is toggled for viewport scroll,
+ * selection, hover or a pending measurement, because none of those are authored state (see
+ * ADR 0007 for what dirty state is and is not).
+ */
+/*
+ * `box-shadow` rather than `border` + `padding`, deliberately: the status bar is a grid row
+ * and the document surface takes whatever height is left, so *any* vertical padding here
+ * resizes every screenshot in the suite. Adding four pixels of padding once moved twenty-five
+ * visual baselines by four pixels.
+ */
+.status [data-doc-state] {
+  border-radius: 999px;
+  color: var(--chrome-muted);
+}
+
+.status [data-doc-state][data-dirty='true'] {
+  background: #33290f;
+  box-shadow: inset 0 0 0 1px #7a5c1e;
+  color: #f0c674;
+}
+
+/*
+ * A load or save failure. `data-error` is set alongside the text so a test can wait on the
+ * attribute rather than on prose, and so a cleared message cannot leave a stale marker.
+ */
+.status [data-doc-message][data-error='true'] {
+  max-width: 40ch;
+  overflow: hidden;
+  color: #f2a0a0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status__spacer {
+  flex: 1;
+}
+
+.status__hint kbd {
+  padding: 0 4px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 3px;
+  background: #24262d;
+  font: inherit;
+}
+
+/* ------------------------------------------------------------------- overlay */
+/*
+ * Editor chrome in screen space (§3.8).
+ *
+ * Outside the zoom transform on purpose: this is what keeps selection strokes
+ * exactly 1px and handle squares a constant size at 10% and at 1600%. The cost is
+ * one multiply-by-zoom per point, paid in `Overlay.toLayer`.
+ *
+ * `pointer-events: none` is load-bearing, not tidiness — the overlay sits above the
+ * pages, so without it every click would land on chrome instead of the document.
+ */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.p1-overlay-box {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.p1-overlay-box--selection {
+  border: 1px solid var(--selection);
+}
+
+.p1-overlay-box--hover {
+  border: 1px solid var(--selection-hover);
+}
+
+.p1-overlay-box--marquee {
+  border: 1px solid var(--selection);
+  background: color-mix(in srgb, var(--selection) 12%, transparent);
+}
+
+.p1-overlay-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  border: 1px solid var(--selection);
+  border-radius: 2px;
+  background: var(--chrome-bg);
+}
+
+.p1-overlay-rotate {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  margin: -6px 0 0 -6px;
+  border: 1px solid var(--selection);
+  border-radius: 50%;
+  background: var(--chrome-bg);
+}
+
+.p1-overlay-snap {
+  position: absolute;
+  background: var(--snap);
+}
+
+/* -------------------------------------------------------------- text frames */
+/*
+ * These rules are part of the *document*, not the chrome, so they change what a page
+ * screenshot shows. They are kept here rather than in `render/` because the renderer
+ * writes inline styles for everything the model owns; CSS supplies only the defaults
+ * for properties the model leaves unset (ADR 0003).
+ */
+
+.p1-text-frame {
+  /*
+   * The document default, overridden by the model's `style` when set. A sans-serif
+   * stack because it is what every browser has; a publishing default belongs in the
+   * document's style resources, not hard-coded in a stylesheet.
+   */
+  color: #111111;
+}
+
+/*
+ * `white-space: pre-wrap` is load-bearing, not cosmetic. ADR 0001 finding 1: the model
+ * preserves whitespace exactly, and without this the browser would collapse leading,
+ * trailing and repeated spaces — so the text on screen would not be the text in the
+ * document, and the round trip would fail for reasons unrelated to the fence.
+ *
+ * It is also what renders a run's `\n` as a soft break, which is why the render
+ * direction emits no `<br>` at all.
+ */
+.p1-text-content {
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /*
+   * Overflowing text stays visible so a user can see they have overflowed. The page's
+   * own `overflow: hidden` clips at the page boundary, which is the right place for
+   * that decision — a text frame is not a clipping box (ADR 0003).
+   */
+  overflow: visible;
+
+  /*
+   * The document's own typography floor, stated here rather than inherited.
+   *
+   * `body` declares `font: 13px/1.5 system-ui`, and `line-height` is a *number*, so it
+   * inherits as a factor and recomputes against whatever font-size applies. Without
+   * this rule a text frame with no `TextStyle` rendered at **13px** — the editor
+   * toolbar's font. Measured, not assumed: see `tests/spike/measure-probe.spec.ts`.
+   *
+   * That was wrong twice over. A page-layout editor whose documents are sized by its
+   * own chrome means restyling the toolbar reflows every default document; and it
+   * makes every *measurement* conditional on a stylesheet the document does not own,
+   * which is precisely the coupling ADR 0004's measurement contract forbids.
+   *
+   * `TextStyle.fontSize` overrides this; the renderer writes an empty value for an
+   * unset property so this default shows through.
+   */
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+/*
+ * An empty paragraph is emitted as `<p></p>` with no `<br>`, so it has zero height
+ * without this — the caret would sit on a collapsed line and `Enter` would have
+ * nowhere visible to go. ADR 0001 finding 4.
+ *
+ * `1em` rather than `1lh`: the `lh` unit is newer than the editor's browser floor,
+ * and for a *minimum* the difference between a font size and a line box is invisible.
+ */
+.p1-text-content p {
+  margin: 0;
+  min-height: 1em;
+}
+
+/* ---------------------------------------------------------------- inspector */
+
+.inspector {
+  grid-area: inspector;
+  border-left: 1px solid var(--chrome-border);
+  overflow: auto;
+  font-size: 12px;
+}
+
+.p1-inspector-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--chrome-muted);
+}
+
+.p1-inspector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px;
+}
+
+.p1-inspector-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/*
+ * `hidden` must actually hide.
+ *
+ * The UA stylesheet's `[hidden] { display: none }` is a plain type selector, so *any*
+ * author rule that sets `display` on the same element beats it on specificity. Both
+ * `.p1-inspector-field` (flex) and `.p1-inspector-grid` (grid) do, which means setting
+ * `row.hidden = true` in JavaScript left the row on screen — and a field the panel had
+ * decided did not apply stayed visible and editable.
+ *
+ * The panel hides and shows rows constantly (a corner radius exists only for a rect, a
+ * fill only for a kind with an interior), so this is not an edge case. Restated here with
+ * enough specificity to win, and deliberately *not* `!important`: a structural rule in the
+ * stylesheet is the right place for this, and the alternative is remembering to
+ * `style.display = 'none'` at every site that hides something.
+ */
+.p1-inspector-field[hidden],
+.p1-inspector-appearance[hidden] {
+  display: none;
+}
+
+.p1-inspector-field-label {
+  width: 12px;
+  color: var(--chrome-muted);
+  text-align: right;
+}
+
+.p1-inspector-field-input {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  background: #24262d;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.p1-inspector-field-input:focus {
+  outline: 2px solid var(--selection);
+  outline-offset: -1px;
+}
+
+.p1-inspector-field-input--invalid {
+  border-color: var(--danger);
+}
+
+.p1-inspector-subheader {
+  padding: 10px 12px;
+  border-top: 1px solid var(--chrome-border);
+  border-bottom: 1px solid var(--chrome-border);
+  margin-top: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--chrome-muted);
+}
+
+.p1-inspector-text[hidden] {
+  display: none;
+}
+
+.p1-inspector-format,
+.p1-inspector-align {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px 12px;
+}
+
+.p1-inspector-format button,
+.p1-inspector-align button {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  background: #24262d;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.p1-inspector-format button:hover,
+.p1-inspector-align button:hover {
+  background: #2f323b;
+}
+
+/*
+ * The pressed state is `aria-pressed` rather than a bespoke class, so the button is
+ * announced correctly and the styling follows from the attribute instead of being
+ * toggled in two places that can disagree.
+ */
+.p1-inspector-format button[data-active='true'],
+.p1-inspector-align button[data-active='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+/* The glyphs stand in for the marks themselves; weight and slant carry the meaning. */
+.p1-inspector-format-bold {
+  font-weight: 700;
+}
+
+.p1-inspector-format-italic {
+  font-style: italic;
+}
+
+.p1-inspector-format-underline {
+  text-decoration: underline;
+}
+
+.p1-inspector-format-strike {
+  text-decoration: line-through;
+}
+
+/*
+ * A measured value, not an authored one — hence the muted colour, and no input to
+ * type into. `data-status` is exposed so a browser test can assert *which* of ADR
+ * 0004's refusal states it is in, rather than only that some text appeared.
+ */
+.p1-inspector-note {
+  padding: 0 12px 12px;
+  color: var(--chrome-muted);
+  font-size: 11px;
+}
+
+.p1-inspector-note[data-status='hidden'],
+.p1-inspector-note[data-status='stale'] {
+  font-style: italic;
+}
+
+.p1-inspector-note:empty {
+  display: none;
+}

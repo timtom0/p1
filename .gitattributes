@@ -1,0 +1,15 @@
+# Line endings are normalised for source files so diffs and merges behave; the persistent
+# document fixtures are the exception.
+#
+# `tests/golden/*.p1doc` is byte-compared against what the serializer emits -- that is the
+# strongest statement the golden test makes, and it is the property that catches a field being
+# added to the canonicaliser without being added to the parser. On Windows, `core.autocrlf`
+# rewrote those files' line endings to CRLF on checkout, which broke all three byte-identity
+# assertions with a diff consisting entirely of `\n` versus `\r\n`.
+#
+# `-text` tells git not to apply any eol conversion to these paths: they are compared as
+# bytes, so the bytes are the file.
+tests/golden/*.p1doc -text
+
+# The generated asset payloads are a build input, not source.
+tests/golden/generated-assets.txt -text

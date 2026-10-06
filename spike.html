@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P1 — text editing spike</title>
+    <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  </head>
+  <body class="spike">
+    <header class="spike__bar">
+      <strong>P1 · text editing spike</strong>
+      <span class="spike__note">
+        Throwaway harness. Answers §10.3: can `contenteditable` be fenced so the
+        model stays authoritative outside an explicit session?
+      </span>
+    </header>
+
+    <div class="spike__layout">
+      <main class="spike__doc">
+        <div class="canvas" data-canvas>
+          <div class="pages" data-pages></div>
+        </div>
+      </main>
+
+      <aside class="spike__panel">
+        <section>
+          <h2>Session</h2>
+          <div class="spike__row">
+            <button type="button" data-spike="enter">Enter edit mode</button>
+            <button type="button" data-spike="exit">Exit</button>
+          </div>
+          <dl class="spike__dl">
+            <dt>active</dt><dd data-spike-state="active">no</dd>
+            <dt>plaintext-only</dt><dd data-spike-state="plaintext">—</dd>
+            <dt>input events</dt><dd data-spike-state="inputs">0</dd>
+            <dt>beforeinput</dt><dd data-spike-state="beforeinputs">0</dd>
+            <dt>compositions</dt><dd data-spike-state="compositions">0</dd>
+            <dt>model === DOM</dt><dd data-spike-state="inSync">—</dd>
+          </dl>
+        </section>
+
+        <section>
+          <h2>Model</h2>
+          <p class="spike__hint">
+            This is the authoritative value. After a session it must equal what was
+            in the DOM.
+          </p>
+          <pre class="spike__pre" data-spike-model></pre>
+        </section>
+
+        <section>
+          <h2>DOM (live)</h2>
+          <p class="spike__hint">What the browser actually produced during editing.</p>
+          <pre class="spike__pre" data-spike-dom></pre>
+        </section>
+
+        <section>
+          <h2>External change while editing</h2>
+          <p class="spike__hint">
+            Mutates the document from outside the session, to test whether the fence
+            leaks.
+          </p>
+          <div class="spike__row">
+            <button type="button" data-spike="externalMove">Move frame</button>
+            <button type="button" data-spike="externalText">Rewrite model text</button>
+            <button type="button" data-spike="externalHide">Hide frame</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Result</h2>
+          <pre class="spike__pre spike__pre--result" data-spike-result>idle</pre>
+        </section>
+      </aside>
+    </div>
+
+    <script type="module" src="/src/spike/text-spike.ts"></script>
+  </body>
+</html>

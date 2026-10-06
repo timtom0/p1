@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P1</title>
+    <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="toolbar">
+        <span class="toolbar__brand">P1</span>
+        <span class="toolbar__note">M7 · persistence</span>
+        <div class="toolbar__spacer"></div>
+        <!--
+          The creation tools. One button per registered kind, so adding a shape kind is
+          a registry entry rather than new chrome. `data-shape` is the discriminator the
+          app reads; the label comes from the same registry the inspector and the hit
+          tests read, so the button cannot drift from what it creates.
+        -->
+        <div class="toolbar__shapes" role="group" aria-label="Tools">
+          <button type="button" data-tool="select" title="Select (V)" aria-pressed="true">Select</button>
+          <button type="button" data-shape="rect" title="Rectangle (R)">Rect</button>
+          <button type="button" data-shape="ellipse" title="Ellipse (E)">Ellipse</button>
+          <button type="button" data-shape="line" title="Line (L)">Line</button>
+        </div>
+        <!--
+          The only route an image takes into a document.
+
+          A bare file input rather than an asset browser: the asset contract is what M6
+          establishes (ADR 0006), and a picker is UI. One hidden input driven by the
+          toolbar button is the minimum that makes the contract real, and it keeps the
+          path a user actually takes identical to the path the tests take.
+
+          `accept` is a *filter*, not validation -- a user can still pick something that
+          is not an image, which is why `importImageFile` decodes and refuses rather than
+          trusting the extension.
+        -->
+        <button type="button" data-import="image" title="Insert an image">Image</button>
+        <input
+          type="file"
+          accept="image/*"
+          data-file-input="image"
+          hidden
+        />
+        <!--
+          Document lifecycle.
+
+          Save is a *download* and open is an upload, not the File System Access API. The
+          limitation is real and recorded in ADR 0007: no save-in-place, so updating a file
+          means downloading again, and the browser may rename the second copy. In exchange
+          this works identically in every browser and is the only path a browser test can
+          drive, so the round-trip tests exercise the real mechanism.
+
+          The input is hidden and driven by the Open button, exactly as the image import
+          does -- so the path a user takes is the path the tests take.
+        -->
+        <div class="toolbar__document" role="group" aria-label="Document">
+          <button type="button" data-doc="new" title="New document">New</button>
+          <button type="button" data-doc="open" title="Open a .p1doc">Open</button>
+          <button type="button" data-doc="save" title="Save (Ctrl+S)">Save</button>
+          <input
+            type="file"
+            accept=".p1doc,application/json"
+            data-file-input="document"
+            hidden
+          />
+        </div>
+        <!--
+          Layer order.
+
+          Four buttons rather than a layer panel, and the distinction is deliberate: a panel
+          would be a second place that has to know and display paint order, which is the
+          desynchronisable-second-source problem the model rejected a `zIndex` field over. One
+          command per operation, plus `[` / `]` with the command key for the ends, is the whole
+          capability.
+
+          The buttons are marked `aria-disabled` when the selection is empty -- a fact the UI
+          knows without duplicating a model rule. They are deliberately *not* disabled when the
+          move would provably do nothing (the topmost object cannot come further forward):
+          that is the model's no-op rule, and re-implementing the prediction here would be a
+          second copy of it that could disagree.
+        -->
+        <div class="toolbar__layers" role="group" aria-label="Layer order">
+          <button type="button" data-layer="front" title="Bring to front (Ctrl+])">To front</button>
+          <button type="button" data-layer="forward" title="Bring forward (])">Forward</button>
+          <button type="button" data-layer="backward" title="Send backward ([)">Backward</button>
+          <button type="button" data-layer="back" title="Send to back (Ctrl+[)">To back</button>
+        </div>
+        <div class="toolbar__history" role="group" aria-label="History">
+          <button type="button" data-edit="undo" title="Undo (Ctrl+Z)">Undo</button>
+          <button type="button" data-edit="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+        </div>
+        <div class="toolbar__zoom" role="group" aria-label="Zoom">
+          <button type="button" data-zoom="out" title="Zoom out (−)">−</button>
+          <output class="toolbar__zoom-value" data-zoom-readout>100%</output>
+          <button type="button" data-zoom="in" title="Zoom in (+)">+</button>
+          <button type="button" data-zoom="fit" title="Fit (0)">Fit</button>
+          <button type="button" data-zoom="actual" title="Actual size (1)">1:1</button>
+        </div>
+      </header>
+
+      <!--
+        The viewport / canvas / pages stack is the document surface.
+        `data-*` hooks are the only coupling between this markup and app.ts; the
+        canvas and pages are sized and transformed at runtime, never here.
+      -->
+      <div class="ruler-corner" data-ruler-corner></div>
+      <div class="ruler ruler--horizontal">
+        <canvas data-ruler-horizontal></canvas>
+      </div>
+      <div class="ruler ruler--vertical">
+        <canvas data-ruler-vertical></canvas>
+      </div>
+
+      <!--
+        `.surface` clips the overlay to exactly the document area. Without it the
+        overlay layer would be positioned against the window, and selection chrome
+        would appear over the rulers and the toolbar.
+      -->
+      <div class="surface">
+        <main class="viewport" data-viewport>
+          <div class="canvas" data-canvas>
+            <div class="pages" data-pages></div>
+          </div>
+        </main>
+        <!--
+          The overlay is screen-space chrome: never inside `.canvas`, so it is not
+          affected by the zoom transform and its strokes stay 1px at any zoom.
+          `pointer-events: none` keeps every click falling through to the document.
+        -->
+        <div class="overlay" data-overlay aria-hidden="true"></div>
+      </div>
+
+      <footer class="status">
+        <span data-zoom-status>100%</span>
+        <span>x <span data-status="point">—</span></span>
+        <span data-status="page">—</span>
+        <span data-stat="name"></span>
+        <!--
+          The dirty indicator. `data-dirty` is the machine-readable half and the text is the
+          human half; both are written from the same `DocumentSession.isDirty` read, so they
+          cannot disagree. Neither mentions the DOM, the viewport or a pending measurement.
+          See ADR 0007 for what dirty state is and is not.
+        -->
+        <span data-doc-state data-dirty="false">Saved</span>
+        <span data-doc-message></span>
+        <span data-stat="stack">—</span>
+        <span data-stat="nodes">0 objects</span>
+        <span class="status__spacer"></span>
+        <span class="status__hint">
+          <kbd>click</kbd> select · <kbd>drag</kbd> move · <kbd>⇧</kbd> constrain ·
+          <kbd>alt</kbd> through lock · <kbd>⌫</kbd> delete · <kbd>⏎</kbd> edit text ·
+          <kbd>ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>ctrl</kbd>+<kbd>S</kbd> save
+        </span>
+      </footer>
+
+      <!--
+        The inspector. Its fields are built from a schema in `inspector.ts`, so the
+        markup here stays empty on purpose — a hand-written field list in HTML would
+        immediately drift from the schema.
+      -->
+      <aside class="inspector" data-inspector></aside>
+    </div>
+
+    <script type="module" src="/src/ui/app.ts"></script>
+  </body>
+</html>

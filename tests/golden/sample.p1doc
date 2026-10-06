@@ -1,0 +1,474 @@
+{
+  "format": "p1doc",
+  "formatVersion": 2,
+  "id": "doc_golden",
+  "name": "Golden fixture",
+  "pageSize": {
+    "width": 210,
+    "height": 297,
+    "unit": "mm",
+    "orientation": "portrait"
+  },
+  "assets": {
+    "asset_a": {
+      "kind": "image",
+      "mime": "image/png",
+      "intrinsicWidth": 8,
+      "intrinsicHeight": 6,
+      "data": {
+        "inline": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGElEQVR4nGPwr/kPR8iAgXQJZA6yItIlAIk9cqlN/AY+AAAAAElFTkSuQmCC"
+      }
+    },
+    "asset_b": {
+      "kind": "image",
+      "mime": "image/png",
+      "intrinsicWidth": 4,
+      "intrinsicHeight": 4,
+      "data": {
+        "inline": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR4nGP4Oo/777MuCGIgjgMAl+cjlb5TJYcAAAAASUVORK5CYII="
+      }
+    },
+    "asset_ext": {
+      "kind": "image",
+      "mime": "image/png",
+      "intrinsicWidth": 16,
+      "intrinsicHeight": 16,
+      "data": {
+        "external": "./assets/not-in-the-bundle.png"
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "page_1",
+      "name": "Cover",
+      "background": {
+        "type": "solid",
+        "color": "#ffffff"
+      },
+      "objects": [
+        {
+          "type": "shape",
+          "id": "node_rect",
+          "name": "Banner",
+          "transform": {
+            "x": 24,
+            "y": 32,
+            "width": 160,
+            "height": 48,
+            "rotation": 0.17453292519943295,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 0.85,
+          "blendMode": "normal",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 8
+          },
+          "fill": {
+            "type": "solid",
+            "color": "#4f7cff"
+          },
+          "stroke": {
+            "paint": {
+              "type": "solid",
+              "color": "#1b3a8f"
+            },
+            "width": 2,
+            "align": "inside"
+          }
+        },
+        {
+          "type": "shape",
+          "id": "node_ellipse",
+          "name": "Dot",
+          "transform": {
+            "x": 24,
+            "y": 100,
+            "width": 40,
+            "height": 40,
+            "rotation": 0,
+            "scaleX": 1.5,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "multiply",
+          "shape": {
+            "kind": "ellipse"
+          },
+          "fill": {
+            "type": "solid",
+            "color": "#f59e0b"
+          }
+        },
+        {
+          "type": "shape",
+          "id": "node_line",
+          "name": "Rule",
+          "transform": {
+            "x": 24,
+            "y": 152,
+            "width": 120,
+            "height": 0,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "shape": {
+            "kind": "line"
+          },
+          "stroke": {
+            "paint": {
+              "type": "solid",
+              "color": "#111827"
+            },
+            "width": 3,
+            "align": "inside"
+          }
+        },
+        {
+          "type": "shape",
+          "id": "node_bare",
+          "name": "No fill, no stroke",
+          "transform": {
+            "x": 200,
+            "y": 32,
+            "width": 24,
+            "height": 24,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 0
+          }
+        },
+        {
+          "type": "textFrame",
+          "id": "node_text",
+          "name": "Body",
+          "transform": {
+            "x": 24,
+            "y": 180,
+            "width": 150,
+            "height": 90,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "text": {
+            "blocks": [
+              {
+                "kind": "paragraph",
+                "runs": [
+                  {
+                    "text": "Heading"
+                  },
+                  {
+                    "text": " in bold",
+                    "format": {
+                      "bold": true
+                    }
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "kind": "paragraph",
+                "runs": [
+                  {
+                    "text": "Mixed "
+                  },
+                  {
+                    "text": "italic",
+                    "format": {
+                      "italic": true
+                    }
+                  },
+                  {
+                    "text": ", "
+                  },
+                  {
+                    "text": "underlined",
+                    "format": {
+                      "underline": true
+                    }
+                  },
+                  {
+                    "text": ", "
+                  },
+                  {
+                    "text": "struck",
+                    "format": {
+                      "strike": true
+                    }
+                  },
+                  {
+                    "text": ", "
+                  },
+                  {
+                    "text": "all four",
+                    "format": {
+                      "bold": true,
+                      "italic": true,
+                      "underline": true,
+                      "strike": true
+                    }
+                  },
+                  {
+                    "text": "."
+                  }
+                ]
+              },
+              {
+                "kind": "paragraph",
+                "runs": [
+                  {
+                    "text": "A third paragraph, so the frame has more than one block."
+                  }
+                ],
+                "align": "justify"
+              }
+            ]
+          },
+          "style": {
+            "fontSize": 16,
+            "lineHeight": 1.5,
+            "color": "#111827"
+          }
+        },
+        {
+          "type": "textFrame",
+          "id": "node_text_sparse",
+          "name": "Sparse style",
+          "transform": {
+            "x": 24,
+            "y": 276,
+            "width": 120,
+            "height": 20,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "text": {
+            "blocks": [
+              {
+                "kind": "paragraph",
+                "runs": [
+                  {
+                    "text": "Only fontSize is authored."
+                  }
+                ]
+              }
+            ]
+          },
+          "style": {
+            "fontSize": 11
+          }
+        },
+        {
+          "type": "image",
+          "id": "node_image_a",
+          "name": "Blue",
+          "transform": {
+            "x": 24,
+            "y": 200,
+            "width": 40,
+            "height": 30,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "asset": "asset_a",
+          "fit": "contain"
+        },
+        {
+          "type": "image",
+          "id": "node_image_b",
+          "name": "Amber, fit absent",
+          "transform": {
+            "x": 72,
+            "y": 200,
+            "width": 30,
+            "height": 30,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "asset": "asset_b"
+        },
+        {
+          "type": "image",
+          "id": "node_image_missing",
+          "name": "External, unresolvable",
+          "transform": {
+            "x": 110,
+            "y": 200,
+            "width": 20,
+            "height": 20,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "asset": "asset_ext",
+          "fit": "cover"
+        },
+        {
+          "type": "shape",
+          "id": "node_opaque",
+          "name": "Carries extensions",
+          "transform": {
+            "x": 140,
+            "y": 200,
+            "width": 24,
+            "height": 24,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "shape": {
+            "kind": "ellipse"
+          },
+          "fill": {
+            "type": "solid",
+            "color": "#10b981"
+          },
+          "extensions": {
+            "com.example.plugin": {
+              "anything": [
+                1,
+                2,
+                {
+                  "nested": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "page_2",
+      "name": "Notes",
+      "background": {
+        "type": "solid",
+        "color": "#f3f4f6"
+      },
+      "objects": [
+        {
+          "type": "textFrame",
+          "id": "node_notes",
+          "name": "Notes",
+          "transform": {
+            "x": 24,
+            "y": 32,
+            "width": 150,
+            "height": 40,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "text": {
+            "blocks": [
+              {
+                "kind": "paragraph",
+                "runs": [
+                  {
+                    "text": "Second page."
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": "node_hidden",
+          "name": "Hidden and locked",
+          "transform": {
+            "x": 24,
+            "y": 90,
+            "width": 40,
+            "height": 40,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": false,
+          "locked": true,
+          "opacity": 0.5,
+          "blendMode": "normal",
+          "shape": {
+            "kind": "rect",
+            "cornerRadius": 2
+          },
+          "fill": {
+            "type": "solid",
+            "color": "#6b7280"
+          }
+        },
+        {
+          "type": "image",
+          "id": "node_image_shared",
+          "name": "Same asset as page 1",
+          "transform": {
+            "x": 80,
+            "y": 90,
+            "width": 24,
+            "height": 18,
+            "rotation": 0,
+            "scaleX": 1,
+            "scaleY": 1
+          },
+          "visible": true,
+          "locked": false,
+          "opacity": 1,
+          "blendMode": "normal",
+          "asset": "asset_a"
+        }
+      ]
+    }
+  ]
+}

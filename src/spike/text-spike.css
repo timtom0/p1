@@ -1,0 +1,174 @@
+/*
+ * Styles for the text-editing spike harness only.
+ *
+ * The document-surface rules deliberately mirror the main app's stylesheet, so the
+ * spike exercises the real rendering conditions rather than a convenient
+ * approximation of them.
+ */
+
+body.spike {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font:
+    13px/1.5 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  background: #1c1d22;
+  color: #e6e7ea;
+}
+
+.spike__bar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2e3038;
+}
+
+.spike__note {
+  color: #8b8f99;
+  font-size: 12px;
+}
+
+.spike__layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  flex: 1;
+  min-height: 0;
+}
+
+.spike__doc {
+  overflow: auto;
+  background: #14151a;
+  padding: 24px;
+}
+
+/* Mirrors the main app's document surface. */
+.canvas {
+  position: relative;
+  margin: 0 auto;
+}
+
+.pages {
+  position: relative;
+  transform-origin: 0 0;
+}
+
+.page {
+  position: absolute;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.objects {
+  position: absolute;
+  inset: 0;
+}
+
+.p1-object {
+  position: absolute;
+  box-sizing: border-box;
+  transform-origin: 50% 50%;
+}
+
+.p1-text-frame {
+  /* No padding or border: the spike tests content mapping, not frame styling. */
+  color: #111111;
+}
+
+/*
+ * `white-space: pre-wrap` is load-bearing, not cosmetic. Without it the browser
+ * collapses leading, trailing and repeated spaces on render, so text the model
+ * contains would not be the text displayed — and a round-trip test would fail for
+ * reasons that have nothing to do with the fence.
+ */
+.p1-text-content {
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.p1-text-frame[data-editing='true'] {
+  outline: 1px dashed #4f7cff;
+  outline-offset: 2px;
+}
+
+.spike__panel {
+  border-left: 1px solid #2e3038;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.spike__panel h2 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b8f99;
+}
+
+.spike__panel section {
+  margin-bottom: 16px;
+}
+
+.spike__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.spike__row button {
+  padding: 4px 8px;
+  border: 1px solid #2e3038;
+  border-radius: 5px;
+  background: #24262d;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.spike__row button:hover {
+  background: #2f323b;
+}
+
+.spike__dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 8px 0 0;
+}
+
+.spike__dl dt {
+  color: #8b8f99;
+}
+
+.spike__dl dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.spike__hint {
+  margin: 0 0 6px;
+  color: #8b8f99;
+}
+
+.spike__pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 5px;
+  background: #121317;
+  color: #a8d8b9;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 30vh;
+  overflow: auto;
+}
+
+.spike__pre--result {
+  color: #ffd479;
+}
