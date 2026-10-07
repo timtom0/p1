@@ -1,4 +1,4 @@
-﻿# The mutation corpus.
+# The mutation corpus.
 #
 # Split out of `mutation-check.ps1` so the runner and the list of mutations cannot diverge: the
 # runner dot-sources this file, so there is exactly one place a mutation is declared. Previously
@@ -392,3 +392,37 @@ Add-Mutation 'the chrome is drawn from the node own local transform, not the com
   'src\editor\editor.ts' `
   { param($t) $t.Replace("        rect: toRect(placement.transform),`n        // The composed linear part", "        rect: toRect(node.transform),`n        // The composed linear part") } `
   'tests/editor/group-geometry.spec.ts'
+# --- M14: asset garbage collection -----------------------------------------------------
+# ADR 0014. The list is organised by the claim each mutation is aimed at, and the reach mutations come
+# first because they are the ones a shallow walk would pass by accident:
+#
+#   reach     a walk that only sees top-level images, or that treats hidden as unreferenced
+#   count     reference counting rather than ownership -- one asset, two images
+#   no-op     rebuilding the table when there is nothing to collect
+
+Add-Mutation 'garbage collection only sees top-level images' `
+  'src\model\assets.ts' `
+  { param($t) $t.Replace("  for (const placement of placementsInDocument(doc)) {`n    if (placement.node.type === 'image') out.add(placement.node.asset);`n  }","  for (const page of doc.pages) {`n    for (const node of page.objects) {`n      if (node.type === 'image') out.add(node.asset);`n    }`n  }") } `
+  'src/model/asset-gc.test.ts'
+
+# The plausible wrong implementation, aimed at the **ancestor chain** rather than the leaf.
+#
+# A first attempt filtered on `placement.node.visible` and *survived*, which is informative rather than
+# merely inconvenient: a leaf inside a hidden group is itself `visible: true` -- the hidden-ness is on
+# the ancestor -- so that substitution was a no-op. Recorded because "did the leaf go dark, or did its
+# container?" is exactly the question a reach walk has to answer, and it is why the test asserts that
+# `placement.node.visible` is *not* the answer.
+Add-Mutation 'garbage collection treats an image under a hidden group as unreferenced' `
+  'src\model\assets.ts' `
+  { param($t) $t.Replace("    if (placement.node.type === 'image') out.add(placement.node.asset);", "    if (placement.ancestors.some((group) => !group.visible)) continue;`n    if (placement.node.type === 'image') out.add(placement.node.asset);") } `
+  'src/model/asset-gc.test.ts'
+
+Add-Mutation 'a shared asset is collected while an image still uses it' `
+  'src\model\assets.ts' `
+  { param($t) $t.Replace("    .filter((id) => !referenced.has(id))","    .filter(() => true)") } `
+  'src/model/asset-gc.test.ts'
+
+Add-Mutation 'a collection with nothing to collect rebuilds the table anyway' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace("        const table = prunedAssetTable(doc);`n        if (table === null) return doc;`n        return { ...doc, assets: table };","        const table = prunedAssetTable(doc) ?? { ...doc.assets };`n        return { ...doc, assets: table };") } `
+  'src/model/asset-gc.test.ts'

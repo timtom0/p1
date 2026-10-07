@@ -25,6 +25,7 @@ import type {
 } from './types';
 import { createTransform, createGroupNode } from './factory';
 import { normalizeRichText, richTextEqual as richTextEquals } from './rich-text';
+import { prunedAssetTable } from './assets';
 import { worldTransformIn } from './transform';
 import { isGroup, locateNode, mapNodesByIdIn, removeNodesById } from './tree';
 import type { NodeLocation } from './tree';
@@ -72,6 +73,22 @@ export type Command =
    *    references are not.
    */
   | { type: 'setAssets'; assets: Readonly<Record<string, AssetRecord>> }
+  /**
+   * Drops every asset record that no image node references, at any depth.
+   *
+   * **No payload, deliberately** (ADR 0014). The set of orphans is a fact about the document, not
+   * something the caller knows and states — and a payload would let a caller collect an asset that is
+   * still referenced, or miss one that is not, which is exactly the decision this command exists to own.
+   *
+   * One command rather than a `removeAsset` per orphan, so a document with forty orphans produces
+   * **one** undo step. And because `History` snapshots whole documents, undo restores the bytes —
+   * which is the obligation ADR 0006 accepted when it deferred collection.
+   *
+   * Never implicit. Nothing on load, save, or delete calls it; the editor issues it from an explicit
+   * user action. Returns the same `doc` reference when there is nothing to collect, so `isNoop` is true
+   * and no empty undo step appears.
+   */
+  | { type: 'pruneAssets' }
   /**
    * Wraps sibling nodes in a new group, in place.
    *
@@ -263,6 +280,15 @@ export function apply(doc: Document, command: Command): Document {
         }),
       );
     }
+
+    case 'pruneAssets': {
+        // Same no-op rule as every other command: return the *same document* so `isNoop` is true and
+        // a collection with nothing to do is not an undo step. `prunedAssetTable` returns `null` for
+        // exactly that case, which is why it does not need to compare tables here.
+        const table = prunedAssetTable(doc);
+        if (table === null) return doc;
+        return { ...doc, assets: table };
+      }
 
     case 'setAssets': {
       // Merged per key rather than replacing the table, so `setAssets` can add one asset
@@ -641,8 +667,10 @@ export function describeCommand(command: Command): string {
       return 'Edit text';
     case 'setPageProps':
       return 'Change page';
-    case 'group':
+    case 'pruneAssets':
       // Past tense, like every label here: this is what the Edit menu says *after* the fact.
+      return 'Clean up unused images';
+    case 'group':
       return 'Group';
     case 'ungroup':
       return 'Ungroup';

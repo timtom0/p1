@@ -33,7 +33,9 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M10b** Affine decision | **Done — RESTRICT GROUPS** — see [M10b notes](#m10b-implementation-notes--does-the-geometry-model-need-affine-transforms) and [ADR 0011](adr/0011-affine-transform-decision.md). The 28-site inventory; the candidate model defined and proved; rotation survives under shear; resize, hit testing, measurement and rendering are already correct for any invertible matrix; and the extension is refused because it buys one capability nothing can produce while forcing a stroke decision with no cheap answer. Two pre-existing bugs found (the selection frame does not follow rotation; the stroke semantic was never chosen). |
 | **M11** Selection geometry | **Done** — see [M11 notes](#m11-implementation-notes--the-geometry-groups-will-stand-on) and [ADR 0011b](adr/0011b-selection-frame-and-stroke.md). F6 fixed: the selection outline, its eight handles and its rotation grip are now the object's *transformed* frame, reusing the renderer's own projection rather than adding a second one. `selectionRect` renamed `modelFrameUnion`; `paintedBounds` and `transformedCorners` added so "where is this object" is a named quantity. F7/F8 resolved: stroke width is a local dimension and transforms with the object. The accidental rotate-handle suppression is gone. |
 | **M12** Group model | **Done — the document object, no interaction** — see [M12 notes](#m12-implementation-notes--the-group-model) and [ADR 0012](adr/0012-persistent-group-model.md). `GroupNode` with group-local children, nesting to arbitrary depth, uniform-only group scale, `tree.ts` as the single recursive traversal, paint order by flattening. Persistence at `formatVersion: 2`, with version 1 still read and no migration. |
-| M13+ | Not started |
+| **M13** | Group interaction | **Done** - see [ADR 0013](adr/0013-group-interaction.md). `group`/`ungroup` through the command funnel; grouping as a pure structural array move on M12's theorem; contiguous-span grouping; child object identity preserved; moved-group ungroup composition; group scope with entry and exit; the ancestor/descendant selection invariant enforced in `setSelection`. The M12 group fixture was overwritten and recovered from the session store. |
+| **M14** | Asset garbage collection | **Done** - see [ADR 0014](adr/0014-asset-garbage-collection.md). Closes the named gap from ADR 0006 §5. |
+| M15+ | Not started |
 
 Seven known limitations are recorded rather than hidden. None blocks the next milestone:
 
@@ -3271,8 +3273,11 @@ so it records a marked placeholder rather than an empty rectangle.
   project that cannot be postponed: `Record<AssetId, AssetRecord>` is plain JSON, but
   `{ external }` resolution and resource-loading order are genuine prerequisites for M8 and
   are recorded rather than designed here.
-- **Asset garbage collection is owed.** It needs a reference count across the document and
-  it needs to interact with undo, so it is not a `removeAsset` command.
+- ~~**Asset garbage collection is owed.**~~ **Done** - see [ADR 0014](adr/0014-asset-garbage-collection.md).
+  A payload-free `pruneAssets` command: one undo step, `apply` returns the same reference when there is
+  nothing to collect, and the reference walk uses `placementsInDocument` so GC sees exactly the nodes the
+  editor can see. Explicit only — nothing on load, save, or delete collects, because the bytes are
+  history and an implicit sweep would take them with no undo step to restore them.
 - **A text frame's opacity is still unreachable** from the inspector; the fix is to move
   opacity into the always-present Transform section, not to loosen the section rule.
 - **The zero-extent hit-test quirk applies to every object type**, not just images. Whatever

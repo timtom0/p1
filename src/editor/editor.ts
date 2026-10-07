@@ -35,7 +35,7 @@ import { identity } from '../core/geom/mat2d';
 import { unionRects } from '../core/geom/rect';
 import type { Vec2 } from '../core/geom/mat2d';
 import type { Document, ImageNode, Node as ModelNode, ShapeKind, Transform2D } from '../model/types';
-import { createAssetFrom, hasAsset } from '../model/assets';
+import { createAssetFrom, hasAsset, orphanAssetIds } from '../model/assets';
 import type { AssetState } from '../model/assets';
 import { deriveAssetState } from '../render/types/image';
 import { createId } from '../core/ids';
@@ -1505,6 +1505,24 @@ export class Editor {
   }
 
   /**
+ * Drops every asset record no image references, as one undoable command.
+ *
+ * **Explicit, never automatic** (ADR 0014 §2). Nothing on load, save or delete calls this, because the
+ * bytes are history: an implicit sweep would delete them with no undo step to bring them back, which is
+ * the exact hazard ADR 0006 named when it deferred collection.
+ *
+ * Returns how many records were dropped, so the caller can report "nothing to clean up" instead of
+ * pretending it did something. A document with nothing to collect makes `apply` return the same
+ * reference, `isNoop` true, and no history entry.
+ */
+pruneUnusedAssets(): number {
+  const count = orphanAssetIds(this.doc).length;
+  if (count === 0) return 0;
+  this.store.mutate('Clean up unused images', () => ({ type: 'pruneAssets' }));
+  return count;
+}
+
+/**
    * The single place a selection becomes the editor's.
    *
    * Every selection change goes through here -- click, shift-click, marquee, select-all, an undo, and

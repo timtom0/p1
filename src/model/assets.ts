@@ -10,8 +10,9 @@
  * browser make of the bytes?*, and feeds the answer in.
  */
 
-import type { AssetData, AssetId, AssetRecord, ImageFit } from './types';
+import type { AssetData, AssetId, AssetRecord, Document, ImageFit } from './types';
 import { createId } from '../core/ids';
+import { placementsInDocument } from './tree';
 
 /**
  * Whether an asset has resolved, **in this browser session**.
@@ -165,6 +166,77 @@ export function hasAsset(
  * file with several broken assets, and reporting all of them at once beats one failure per
  * attempt.
  */
+/**
+ * Every asset id an image node still points at, **at any depth**.
+ *
+ * ## Why this is the traversal `tree.ts` already owns
+ *
+ * "Which assets are referenced" is the same question as "which nodes exist", asked with a filter. And
+ * `tree.ts` exports four look-alike lookups with *different* reachability: `placementOf` finds leaves
+ * only, `nodeById` finds everything, `locateNode` finds everything and reports the owner, and
+ * `pageIdOf` is built on the leaf-only `placementOnPage` and so answers `null` for a group.
+ *
+ * That disagreement has already cost once. M13 shipped a selected group that drew **no outline**, with
+ * no error anywhere, because a consumer reached for `pageIdOf` and concluded the group was not on the
+ * page. So this function uses `placementsInDocument` — the same list rendering and hit testing walk —
+ * rather than adding a fourth answer to the question.
+ *
+ * The cost is a matrix per leaf, which is irrelevant for an explicit user action. The benefit is the
+ * guarantee that actually matters: **GC sees exactly the objects the editor can see**, so an image
+ * inside a hidden group, a locked group, or a group nested in a group is still found.
+ *
+ * ## What "referenced" does *not* mean
+ *
+ * Not painted, not unlocked, not selected: none of those. A hidden image still needs its bytes to be
+ * restored the moment it is unhidden, and treating "invisible" as "unreferenced" would delete them and
+ * leave the un-hide a broken promise. Visibility is a paint state (ADR 0012), not ownership.
+ *
+ * A `Set`, because one asset may back several images and must survive until the last one goes.
+ */
+export function referencedAssetIds(doc: Document): Set<AssetId> {
+  const out = new Set<AssetId>();
+  for (const placement of placementsInDocument(doc)) {
+    if (placement.node.type === 'image') out.add(placement.node.asset);
+  }
+  return out;
+}
+
+/**
+ * The asset ids present in the table that nothing references.
+ *
+ * Pure and side-effect free, so "what would be collected" is answerable without mutating the document
+ * — which is what lets the editor confirm the action rather than performing it silently.
+ *
+ * Returned in **sorted** order because a collection order is user-visible (it is the order records
+ * disappear from the table, and the order of any diagnostic naming them), and `Object.keys` order is
+ * insertion order rather than anything meaningful. Note this is a genuine sort of a *set of ids*, not of
+ * a document array: paint order lives in `Page.objects` and ADR 0007 forbids sorting arrays.
+ */
+export function orphanAssetIds(doc: Document): AssetId[] {
+  const referenced = referencedAssetIds(doc);
+  return Object.keys(doc.assets)
+    .filter((id) => !referenced.has(id))
+    .sort();
+}
+
+/**
+ * A copy of `doc.assets` with every unreferenced record removed, or `null` when there is nothing to do.
+ *
+ * Returns `null` rather than the same table so the caller can propagate reference identity without
+ * knowing what "nothing to do" looks like — the M11 rule, applied to a table instead of an array.
+ * Note it returns the **table**, not the document: deciding what a command does is the command's job.
+ */
+export function prunedAssetTable(doc: Document): Record<AssetId, AssetRecord> | null {
+  const orphans = orphanAssetIds(doc);
+  if (orphans.length === 0) return null;
+  const out: Record<AssetId, AssetRecord> = {};
+  for (const id of Object.keys(doc.assets)) {
+    if (orphans.includes(id)) continue;
+    out[id] = doc.assets[id] as AssetRecord;
+  }
+  return out;
+}
+
 export function assetProblems(asset: AssetRecord, id: AssetId): string[] {
   const problems: string[] = [];
 
