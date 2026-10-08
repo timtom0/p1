@@ -139,6 +139,20 @@ body {
 }
 
 /*
+ * Align and distribute, styled as one continuation of the layer group rather than a panel of its own:
+ * both act on the current selection, so they belong beside the other selection-wide controls and
+ * inherit the same divider.
+ */
+.toolbar__align {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid var(--chrome-border);
+}
+
+/*
  * A layer button with nothing selected.
  *
  * `aria-disabled` rather than `disabled`, deliberately: `disabled` removes the button from
@@ -148,6 +162,16 @@ body {
  * second gate that could disagree with the model about what is possible.
  */
 .toolbar__layers button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
+ * Same treatment for align and distribute, and for the same reason: the buttons stay in the tab order so
+ * a keyboard user can reach them and read why they are unavailable. The two thresholds differ (two
+ * objects to align, three to distribute), so the eight buttons do not grey out together.
+ */
+.toolbar__align button[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }

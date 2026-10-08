@@ -135,11 +135,26 @@ Restore-AfterCrash
 $Vitest     = Join-Path $PSScriptRoot '..\node_modules\.bin\vitest.cmd'
 $Playwright = Join-Path $PSScriptRoot '..\node_modules\.bin\playwright.cmd'
 $Vite       = Join-Path $PSScriptRoot '..\node_modules\vite\bin\vite.js'
-$DevPort    = 5174
+$ViteBuild  = Join-Path $PSScriptRoot '..\node_modules\.bin\vite.cmd'
+$Tsc        = Join-Path $PSScriptRoot '..\node_modules\.bin\tsc.cmd'
+# The two ports the browser suite uses, and they are **not** interchangeable (M15).
+#
+#   5174 -- the production build, served by `vite preview`. This is what `/` resolves to.
+#   5175 -- the dev server, reachable only through the preview server's proxy, and the only thing that
+#           can serve `/spike.html` (excluded from the bundle, loads raw TypeScript).
+#
+# The runner has to reproduce that arrangement or mutants are measured against a serving model the suite
+# never uses. Leaving a *dev* server on 5174 here would be worse than not starting one: `reuseExistingServer`
+# would see 5174 answering and skip `npm run build && vite preview` entirely, so every browser mutant would
+# silently run against the dev server -- and `tests/visual/production-serving.spec.ts` would fail for a
+# reason that has nothing to do with the mutant under test.
+$PreviewPort = 5174
+$DevPort     = 5175
 
-$script:timings   = @()
-$script:devServer = $null
-$script:corpus    = @()
+$script:timings    = @()
+$script:devServer  = $null
+$script:prodServer = $null
+$script:corpus     = @()
 
 function Add-Mutation([string] $label, [string] $path, [scriptblock] $apply, [string] $target) {
   $script:corpus += [pscustomobject]@{ label = $label; path = $path; apply = $apply; target = $target }
@@ -150,25 +165,64 @@ function Stop-DevServer {
     Stop-Process -Id $script:devServer.Id -Force -ErrorAction SilentlyContinue
     $script:devServer = $null
   }
+  if ($null -ne $script:prodServer) {
+    Stop-Process -Id $script:prodServer.Id -Force -ErrorAction SilentlyContinue
+    $script:prodServer = $null
+  }
+}
+
+function Wait-Ready([int] $port, [string] $what) {
+  # Wait for readiness rather than sleeping a fixed interval: a fixed sleep is either wasted time or
+  # a flaky start, and this is the one place a race would show as a mysterious "no tests found".
+  for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep -Milliseconds 500
+    try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -TimeoutSec 2 -UseBasicParsing; return $true } catch { }
+  }
+  Write-Host "WARNING: the shared $what server on $port did not become ready; browser mutants will start their own" -ForegroundColor Yellow
+  return $false
 }
 
 function Start-DevServer {
-  # One server for the whole run. `reuseExistingServer` in playwright.config.ts means Playwright uses
-  # this rather than spawning its own; starting it explicitly is what turns 20 spawns into 1.
+  # Two servers for the whole run, mirroring `playwright.config.ts`. `reuseExistingServer` means Playwright
+  # uses these rather than spawning its own per mutant; starting them explicitly is what turns ~20 spawns
+  # into 2.
   if (-not (Test-Path $Vite)) { return }
+
+  # The production server serves `dist/`, so the build has to exist and has to match the source under
+  # test. `tsc --noEmit` first because that is what `npm run build` does, and a mutant that does not
+  # compile must fail loudly here rather than be served a stale bundle.
+  if (Test-Path $Tsc) {
+    & $Tsc --noEmit
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host 'WARNING: typecheck failed; skipping the shared production server' -ForegroundColor Yellow
+      return
+    }
+  }
+  $null = & $ViteBuild 'build'
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host 'WARNING: the production build failed; skipping the shared production server' -ForegroundColor Yellow
+    return
+  }
+
+  $script:prodServer = Start-Process -FilePath 'node.exe' `
+    -ArgumentList $Vite, 'preview', '--host', '127.0.0.1', '--port', "$PreviewPort", '--strictPort' `
+    -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $env:TEMP 'p1-mutation-preview.log') `
+    -RedirectStandardError  (Join-Path $env:TEMP 'p1-mutation-preview.err')
+  if (-not (Wait-Ready $PreviewPort 'production')) {
+    Stop-Process -Id $script:prodServer.Id -Force -ErrorAction SilentlyContinue
+    $script:prodServer = $null
+    return
+  }
+
   $script:devServer = Start-Process -FilePath 'node.exe' `
     -ArgumentList $Vite, '--host', '127.0.0.1', '--port', "$DevPort", '--strictPort' `
     -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $env:TEMP 'p1-mutation-vite.log') `
     -RedirectStandardError  (Join-Path $env:TEMP 'p1-mutation-vite.err')
-  # Wait for readiness rather than sleeping a fixed interval: a fixed sleep is either wasted time or
-  # a flaky start, and this is the one place a race would show as a mysterious "no tests found".
-  for ($i = 0; $i -lt 60; $i++) {
-    Start-Sleep -Milliseconds 500
-    try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:$DevPort" -TimeoutSec 2 -UseBasicParsing; return } catch { }
+  if (-not (Wait-Ready $DevPort 'dev')) {
+    Stop-DevServer
   }
-  Write-Host 'WARNING: the shared dev server did not become ready; browser mutants will start their own' -ForegroundColor Yellow
-  Stop-DevServer
 }
 
 # Dispatch on the file kind. `tests/` holds two kinds of file and Vitest silently collects none of
@@ -182,6 +236,22 @@ function Is-Browser([string] $target) {
 function Invoke-Target([string] $target) {
   if (Is-Browser $target) {
     if ($NoBrowser) { return $null }
+    # **Rebuild before every browser mutant.** This is not an optimisation, it is the whole mechanism.
+    #
+    # Since M15 the browser suite is served the production bundle, so `/` resolves to `dist/` and the dev
+    # server only answers the proxied `/spike.html`. A mutation to `src/` therefore does nothing at all
+    # unless `dist/` is rebuilt from the mutated source first -- and a bundle built once at the start of the
+    # run means **no source mutation can ever reach a browser test**.
+    #
+    # It presents as every browser mutant being reported "NOT FOUND", which is the worst possible failure
+    # mode for this tool: 20 survivors that all look like coverage gaps and are in fact a harness that
+    # stopped testing anything. That is exactly what happened the first time this was run.
+    #
+    # The build is ~1s, against ~50-100s per browser mutant, so paying it 20 times is cheap. `--mode=basic`
+    # would be wrong: the mutants are in source files, not CSS, so the CSS pipeline is irrelevant, but the
+    # type check is deliberately *not* run -- a mutant that does not compile is still a mutant, and the
+    # bundle should fail loudly in the browser rather than being silently skipped here.
+    $null = & $ViteBuild 'build'
     return (& $Playwright test $target --reporter=line 2>&1 | Out-String)
   }
   return (& $Vitest run $target --reporter=basic 2>&1 | Out-String)

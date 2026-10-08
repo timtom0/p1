@@ -20,6 +20,7 @@
  */
 
 import type { Page } from '@playwright/test';
+import { mountNestedGroup, mountRotatedGroupOneChild } from './align-fixtures';
 import { clientPointAt, clickAt, drag, expect, settle, test } from './helpers';
 import {
   mountGroupedFixture,
@@ -271,6 +272,160 @@ test.describe('moving a group', () => {
     await drag(page, { x: 100, y: 100 }, { x: 140, y: 160 });
     await page.keyboard.press('Control+z');
     expect(await painted(page)).toEqual(before);
+  });
+});
+
+test.describe('moving a child inside a transformed group', () => {
+  /*
+   * The case this file's header has claimed since it was written, and which no test here actually
+   * exercised: `dragging a selected group moves every child` drags the **group**, which sits at depth
+   * 0 where the parent matrix is the identity. So the whole suite was blind to the difference.
+   *
+   * That difference is the coordinate space. A gesture is measured in **page** space -- the pointer,
+   * the painted bounds and the selection outline all live there -- while `Transform2D.x/y` are
+   * **parent-local**. Adding a page delta straight onto `x/y` is correct only at depth 0. One level
+   * down it moves the child along its group's *local* axis, and the child drifts off at an angle
+   * while the drag looks like it worked.
+   *
+   * Measured before the fix: a child of a group rotated 45°, dragged +40 page px along x, moved its
+   * painted bounds by **28.2843** -- exactly `40 * cos 45°`.
+   *
+   * Every assertion below is on the **painted** box, in page space, rather than on the child's
+   * authored `x/y`. Asserting the local transform would pass under the bug, because under the bug
+   * the local transform *did* change by exactly the page delta -- it just moved the child somewhere
+   * else. The painted box is what the user sees and the only thing that can tell the two apart.
+   */
+
+  /** The painted box of every leaf, in page space, at 1:1 zoom. */
+  async function paintedBoxes(
+    page: Page,
+  ): Promise<Record<string, { left: number; top: number; width: number; height: number }>> {
+    return page.evaluate(() => {
+      const out: Record<string, { left: number; top: number; width: number; height: number }> = {};
+      for (const element of document.querySelectorAll('[data-objects] [data-oid]')) {
+        const box = (element as HTMLElement).getBoundingClientRect();
+        out[(element as HTMLElement).dataset['oid'] ?? '?'] = {
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          height: box.height,
+        };
+      }
+      return out;
+    });
+  }
+
+  /**
+   * The document-space centre of a leaf's painted box.
+   *
+   * Read from the DOM rather than computed from the fixture, because the fixture is authored in the
+   * group's *local* space and the point of the test is what that becomes in page space. Clicking the
+   * AABB centre rather than a corner matters: the corner of a rotated box's AABB is empty page.
+   */
+  async function centreOf(page: Page, oid: string): Promise<{ x: number; y: number }> {
+    const point = await page.evaluate((id) => {
+      const element = document.querySelector(`[data-oid="${id}"]`) as HTMLElement | null;
+      if (element === null) throw new Error(`no leaf ${id}`);
+      const box = element.getBoundingClientRect();
+      const page_ = document.querySelector('[data-page]') as HTMLElement;
+      const origin = page_.getBoundingClientRect();
+      return {
+        x: box.left + box.width / 2 - origin.left,
+        y: box.top + box.height / 2 - origin.top,
+      };
+    }, oid);
+    return point;
+  }
+
+  test('a child of a rotated, scaled group follows the pointer, not its group axis', async ({
+    page,
+  }) => {
+    await mountRotatedGroupOneChild(page);
+
+    const target = 'child';
+    const centre = await centreOf(page, target);
+    await clickAt(page, centre.x, centre.y);
+    // A plain click selects the leaf (M12), so this is a child drag and not a group drag.
+    expect(await outlined(page), 'the leaf is selected, not the group').toEqual([target]);
+
+    const before = await paintedBoxes(page);
+    await drag(page, centre, { x: centre.x + 40, y: centre.y });
+
+    const after = await paintedBoxes(page);
+    // The *painted* displacement equals the page-space delta the pointer was asked for.
+    expect(after[target]!.left - before[target]!.left, 'painted dx follows the pointer').toBeCloseTo(
+      40,
+      1,
+    );
+    expect(after[target]!.top - before[target]!.top, 'painted dy follows the pointer').toBeCloseTo(
+      0,
+      1,
+    );
+    // Size is untouched: a move translates, and translation cannot resize a painted box.
+    expect(after[target]!.width).toBeCloseTo(before[target]!.width, 1);
+    expect(after[target]!.height).toBeCloseTo(before[target]!.height, 1);
+
+    // Negative control: what the bug produced. A parent-space delta of 40 would have painted a
+    // displacement of `40 * 1.2 * cos(0.4)` = 44.19 along the group's local x, which rotated into
+    // page space contributes only `44.19 * cos(0.4)` = 40.71 to page x. The correct answer is 40, so
+    // the two differ by **0.71** -- small, because this rotation and scale are both mild.
+    //
+    // Asserted as an exact inequality rather than a comfortable margin, because a comfortable margin
+    // would be a test that passes either way. The 1.2 scale is what makes this meaningful at all: at
+    // scale 1 the buggy displacement along page x is exactly `40 * cos²(0.4)` = 35.28, 4.7 away.
+    const underTheBug = 40 * 1.2 * Math.cos(0.4) * Math.cos(0.4);
+    expect(
+      Math.abs(after[target]!.left - before[target]!.left - underTheBug),
+      'the painted displacement must not be the group-local one',
+    ).toBeGreaterThan(0.5);
+  });
+
+  test('the drag is exactly undoable', async ({ page }) => {
+    await mountRotatedGroupOneChild(page);
+    const centre = await centreOf(page, 'child');
+    await clickAt(page, centre.x, centre.y);
+
+    const before = await paintedBoxes(page);
+    await drag(page, centre, { x: centre.x + 40, y: centre.y });
+    await page.keyboard.press('Control+z');
+
+    expect(await paintedBoxes(page)).toEqual(before);
+  });
+
+  test('a leaf two groups deep also follows the pointer', async ({ page }) => {
+    // Depth 2, with rotation and scale at *both* levels, so the conversion has to compose a chain
+    // rather than invert one matrix. A one-level implementation would pass the test above and fail
+    // this one.
+    await mountNestedGroup(page);
+
+    const centre = await centreOf(page, 'leaf');
+    await clickAt(page, centre.x, centre.y);
+    expect(await outlined(page), 'the innermost leaf is selected').toEqual(['leaf']);
+
+    const before = await paintedBoxes(page);
+    await drag(page, centre, { x: centre.x + 30, y: centre.y - 20 });
+    const after = await paintedBoxes(page);
+
+    expect(after['leaf']!.left - before['leaf']!.left).toBeCloseTo(30, 1);
+    expect(after['leaf']!.top - before['leaf']!.top).toBeCloseTo(-20, 1);
+  });
+
+  test('a top-level object is unaffected by the conversion', async ({ page }) => {
+    // Depth 0: the parent is the page, the parent matrix is the identity, and the conversion must be
+    // a no-op. Without this the fix could pass the nested case while quietly breaking every
+    // ungrouped object in the editor, which is the overwhelming majority of them.
+    await mountGroupFixture(page);
+    // Leaf `c` sits at document (20,140)-(120,240), so (60,160) is inside it -- and it is a direct
+    // child of the page, which is exactly the depth being controlled for.
+    await clickAt(page, 60, 160);
+    expect(await outlined(page), 'the top-level leaf is selected').toEqual(['c']);
+
+    const before = await paintedBoxes(page);
+    await drag(page, { x: 60, y: 160 }, { x: 110, y: 190 });
+    const after = await paintedBoxes(page);
+
+    expect(after['c']!.left - before['c']!.left).toBeCloseTo(50, 1);
+    expect(after['c']!.top - before['c']!.top).toBeCloseTo(30, 1);
   });
 });
 

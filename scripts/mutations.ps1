@@ -255,7 +255,7 @@ Add-Mutation 'the dirty indicator is laid out with padding again (resizes every 
   'tests/editor/persistence.spec.ts'
 
 # --- M11: selection geometry -------------------------------------------------------------
-# F6 and F7/F8. The target is always a *geometric* assertion, never a pixel baseline: ADR 0011b §8
+# F6 and F7/F8. The target is always a *geometric* assertion, never a pixel baseline: ADR 0011b Â§8
 # records that the overlay's baselines cannot see a 1px chrome change at all.
 
 Add-Mutation 'the selection outline is laid out without the object transform' `
@@ -291,7 +291,7 @@ Add-Mutation 'the frame point forgets the rotation, so the frame and the object 
 # only the second leaves the first withholding the handle, so the editor still shows no grip and the
 # test still passes -- a mutation that broke nothing while looking exactly like a real one.
 #
-# That is the same shape as the asset check in §7.4: deleting one owner of a fact leaves the behaviour
+# That is the same shape as the asset check in Â§7.4: deleting one owner of a fact leaves the behaviour
 # intact, and the surviving mutant is evidence of that rather than of a weak test. Both are removed here.
 Add-Mutation 'the rotation grip is offered for a multi-selection, with no aggregate frame' `
   'src\editor\editor.ts' `
@@ -426,3 +426,144 @@ Add-Mutation 'a collection with nothing to collect rebuilds the table anyway' `
   'src\model\commands.ts' `
   { param($t) $t.Replace("        const table = prunedAssetTable(doc);`n        if (table === null) return doc;`n        return { ...doc, assets: table };","        const table = prunedAssetTable(doc) ?? { ...doc.assets };`n        return { ...doc, assets: table };") } `
   'src/model/asset-gc.test.ts'
+
+# ---------------------------------------------------------------------------
+# M16 -- alignment and distribution
+#
+# The corpus above is complete through M15. These cover the new geometry in `model/arrange.ts` and the
+# page-to-local conversion in `editor/transform.ts` that ADR 0016 records.
+#
+# Two rules this block follows, both learned the hard way:
+#
+#  - **Every substitution is a single line.** An earlier draft anchored on two or three lines joined with
+#    `` `r`n ``, and six of them silently failed to apply because the working tree is LF. The runner reports
+#    that as "mutation site not found", which is not a pass -- so single-line anchors only.
+#  - **Each label names the mistake and the test that must catch it.** A mutant that survives "because the
+#    UI test happened to pass" is exactly what must not be accepted.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'aligning uses the model frame instead of the painted bounds' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  if (!isGroup) return paintedBounds(worldTransform);', '  if (!isGroup) return { x: worldTransform.x, y: worldTransform.y, width: worldTransform.width, height: worldTransform.height };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'a group is framed by its own transparent box rather than its members' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  if (!isGroup) return paintedBounds(worldTransform);', '  return paintedBounds(worldTransform);') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'the descendant union skips a group one level down' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    .filter((candidate) => candidate.ancestors.some((group) => group.id === id))', '    .filter((candidate) => candidate.ancestors.length === 1 && candidate.ancestors[0]?.id === id)') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'align right behaves as align left' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('      return { x: bounds.x + bounds.width - (box.x + box.width), y: 0 };', '      return { x: bounds.x - box.x, y: 0 };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'align horizontal centre aligns the left edge instead' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('      return { x: bounds.x + bounds.width / 2 - (box.x + box.width / 2), y: 0 };', '      return { x: bounds.x - box.x, y: 0 };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'align vertical centre aligns the top edge instead' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('      return { x: 0, y: bounds.y + bounds.height / 2 - (box.y + box.height / 2) };', '      return { x: 0, y: bounds.y - box.y };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'align bottom behaves as align top' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('      return { x: 0, y: bounds.y + bounds.height - (box.y + box.height) };', '      return { x: 0, y: bounds.y - box.y };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'alignment is offered with a single object selected' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    ? targets.length >= MIN_ALIGN', '    ? targets.length >= 1') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'distribution is offered with two objects, where both are anchors' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    : targets.length >= MIN_DISTRIBUTE', '    : targets.length >= MIN_ALIGN') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'distribution spaces the centres rather than the gaps' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  const gap = (span - total) / (sorted.length - 1);', '  const gap = span / (sorted.length - 1) - 1;') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'a negative distribution gap is refused rather than applied' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  const gap = (span - total) / (sorted.length - 1);', '  const gap = Math.max(0, (span - total) / (sorted.length - 1));') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'the outermost object is distributed too, instead of anchoring it' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  for (const target of sorted.slice(1, -1)) {', '  for (const target of sorted) {') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'distribution tie-breaks on input order instead of id' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    return delta !== 0 ? delta : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;', '    return delta;') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'distribution sorts vertically when asked for horizontal' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace("  const horizontal = axis === 'horizontal';", "  const horizontal = false;") } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'a spread is distributed horizontally even when asked for vertical' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace("  const extent = (target: ArrangeTarget): number =>", "  const extent = (): number =>") } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'an already-aligned selection records a no-op undo step' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    if (delta.x === 0 && delta.y === 0) return;', '') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'arrangement scales the object instead of translating it' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  return { ...transform, x: transform.x + deltaParent.x, y: transform.y + deltaParent.y };', '  return { ...transform, x: transform.x + deltaParent.x, y: transform.y + deltaParent.y, width: transform.width * 1.01 };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'arrangement clears the rotation instead of preserving it' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  return { ...transform, x: transform.x + deltaParent.x, y: transform.y + deltaParent.y };', '  return { ...transform, x: transform.x + deltaParent.x, y: transform.y + deltaParent.y, rotation: 0 };') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'a target the selection named is dropped when it has no painted box' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('    if (painted === null) return;', '    if (painted === null) targets.push({ id, transform, ancestors, painted: { x: 0, y: 0, width: 0, height: 0 } });') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'the page-space delta is applied as a parent-local one (the pre-M16 drag defect)' `
+  'src\editor\transform.ts' `
+  { param($t) $t.Replace('  if (ancestors.length === 0) return deltaPage;', '  return deltaPage;') } `
+  'src/editor/transform.test.ts'
+
+Add-Mutation 'the page-to-local conversion uses the parent rather than its inverse' `
+  'src\editor\transform.ts' `
+  { param($t) $t.Replace('  const inverse = invert(parentWorldMatrix(ancestors));', '  const inverse = parentWorldMatrix(ancestors);') } `
+  'src/editor/transform.test.ts'
+
+Add-Mutation 'the page-to-local conversion maps the origin instead of differencing two points' `
+  'src\editor\transform.ts' `
+  { param($t) $t.Replace('  return { x: to.x - from.x, y: to.y - from.y };', '  return { x: to.x, y: to.y };') } `
+  'src/editor/transform.test.ts'
+# NOT a mutant: reversing the ancestor chain is an **equivalent** change, and the corpus should not carry
+# something that cannot fail. With every scale in a chain uniform -- the invariant worldTransformIn",
+
+#
+#     R(a)*S(s) * R(b)*S(t)  =  s*t*R(a+b)
+#
+# so the two groupings differ by nothing. Verified by measurement rather than by argument: reversing the
+# chain moves the nested leaf by 30.000000 / -20.000000 either way, the requested page delta to every
+# decimal place. A non-uniform scale would break the identity, and UNIFORM_SCALE_EPSILON refuses such a
+# document before it can reach here.
+  'src/editor/transform.test.ts'
+
+Add-Mutation 'the ancestor chain ignores the outermost group' `
+  'src\editor\transform.ts' `
+  { param($t) $t.Replace('  for (const ancestor of ancestors) {', '  for (const ancestor of ancestors.slice(1)) {') } `
+  'src/editor/transform.test.ts'

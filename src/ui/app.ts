@@ -22,6 +22,8 @@ import './styles.css';
 
 import type { Document, ShapeKind } from '../model/types';
 import type { RestackDirection } from '../model/commands';
+import { arrangeTargets, canArrange } from '../model/arrange';
+import type { AlignMode, DistributeAxis } from '../model/arrange';
 import type { Vec2 } from '../core/geom/mat2d';
 import { importImageFile } from '../render/assets';
 import { createSampleDocument } from '../model/factory';
@@ -69,6 +71,34 @@ function isRestackDirection(value: string): value is RestackDirection {
 }
 
 const RESTACK_DIRECTIONS: readonly RestackDirection[] = ['forward', 'backward', 'front', 'back'];
+
+/**
+ * Narrows a `data-object-align` attribute to the model's `AlignMode`, and a `data-object-distribute`
+ * attribute to its
+ * `DistributeAxis`.
+ *
+ * Guards for the same reason `isRestackDirection` exists: the values come from markup, so a typo must not
+ * reach the model as an operation it has never heard of. Here the failure mode would be worse than an
+ * object that does not move -- an unknown mode would silently fall through every `switch` and align
+ * nothing while reporting success -- so the guard is load-bearing rather than defensive.
+ */
+function isAlignMode(value: string): value is AlignMode {
+  return ALIGN_MODES.includes(value as AlignMode);
+}
+
+function isDistributeAxis(value: string): value is DistributeAxis {
+  return DISTRIBUTE_AXES.includes(value as DistributeAxis);
+}
+
+const ALIGN_MODES: readonly AlignMode[] = [
+  'left',
+  'center-h',
+  'right',
+  'top',
+  'center-v',
+  'bottom',
+];
+const DISTRIBUTE_AXES: readonly DistributeAxis[] = ['horizontal', 'vertical'];
 
 function queryRequired<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -137,6 +167,28 @@ function main(): void {
    * markup cannot reach a command.
    */
   const layerButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-layer]')];
+
+  /** The align buttons, with the mode each one asks for. */
+  const alignButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-object-align]')].map(
+    (button) => {
+      const mode = button.dataset['objectAlign'] ?? '';
+      if (!isAlignMode(mode)) {
+        throw new Error(`Unknown align mode in the app shell: "${mode}"`);
+      }
+      return { button, mode };
+    },
+  );
+
+  /** The distribute buttons, with the axis each one asks for. */
+  const distributeButtons = [
+    ...document.querySelectorAll<HTMLButtonElement>('[data-object-distribute]'),
+  ].map((button) => {
+    const axis = button.dataset['objectDistribute'] ?? '';
+    if (!isDistributeAxis(axis)) {
+      throw new Error(`Unknown distribute axis in the app shell: "${axis}"`);
+    }
+    return { button, axis };
+  });
 
   const imageInput = queryRequired<HTMLInputElement>('[data-file-input="image"]');
 
@@ -300,6 +352,7 @@ function main(): void {
     syncToolButtons();
     syncDocumentChrome();
     syncLayerButtons();
+    syncArrangeButtons();
   }
 
   /**
@@ -422,6 +475,34 @@ function main(): void {
     }
   }
 
+  /**
+   * Marks the align and distribute buttons unavailable when the selection is too small.
+   *
+   * The two thresholds differ and the reason is structural, not a UI decision: alignment needs two
+   * objects and distribution needs three, because distribution fixes the outermost two and moves what is
+   * between them. With two, both objects are the outermost and there is nothing left to move.
+   *
+   * The predicate itself comes from `canArrange` -- the model's own -- rather than being restated here as
+   * `size >= 2` and `size >= 3`. A second copy of the threshold is a second thing that can disagree with
+   * it, and the disagreement would be invisible: the button would look available, the click would do
+   * nothing, and the user would have no way to tell a broken control from a correct refusal.
+   */
+  function syncArrangeButtons(): void {
+    const targets = arrangeTargets(doc(), editor.selectionState.ids);
+    for (const { button, mode } of alignButtons) {
+      button.setAttribute(
+        'aria-disabled',
+        String(!canArrange(targets, { kind: 'align', mode })),
+      );
+    }
+    for (const { button, axis } of distributeButtons) {
+      button.setAttribute(
+        'aria-disabled',
+        String(!canArrange(targets, { kind: 'distribute', axis })),
+      );
+    }
+  }
+
   // ---- initial paint -------------------------------------------------------
   recordBootStep('boot:paint:begin', { pages: doc().pages.length });
   project();
@@ -475,6 +556,22 @@ function main(): void {
     const layer = target.dataset['layer'];
     if (layer !== undefined && isRestackDirection(layer)) {
       editor.restack(layer);
+      return;
+    }
+
+    // Alignment and distribution. Routed through the same single click delegate as every other
+    // toolbar control, and handed straight to `editor.arrange` -- the button does not decide whether the
+    // operation applies. `canArrange` already marked it unavailable in `syncArrangeButtons`, and the
+    // editor refuses it again, so a click that gets here anyway (keyboard, a stale attribute, a test) is
+    // a no-op rather than a second opinion about the threshold.
+    const align = target.dataset['objectAlign'];
+    if (align !== undefined && isAlignMode(align)) {
+      editor.arrange({ kind: 'align', mode: align });
+      return;
+    }
+    const distribute = target.dataset['objectDistribute'];
+    if (distribute !== undefined && isDistributeAxis(distribute)) {
+      editor.arrange({ kind: 'distribute', axis: distribute });
       return;
     }
 

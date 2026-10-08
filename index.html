@@ -87,6 +87,30 @@
           <button type="button" data-layer="backward" title="Send backward ([)">Backward</button>
           <button type="button" data-layer="back" title="Send to back (Ctrl+[)">To back</button>
         </div>
+        <!--
+          Alignment and distribution, in the toolbar beside the layer buttons because both act on
+          "the current selection" and are the other half of what a multi-select is for.
+
+          `aria-disabled` marks the unavailable ones: alignment needs two objects, distribution needs
+          three, and the toolbar says so rather than accepting a click that would do nothing. The
+          buttons stay focusable and clickable -- `aria-disabled` rather than `disabled` -- so the group
+          is discoverable and a keyboard user can find out *why* it is unavailable instead of the
+          controls silently vanishing.
+
+          As with the layer buttons, this reflects only "too few objects selected". Whether a
+          particular alignment would move anything is the model's no-op rule; predicting it here would
+          be a second copy of that rule that could disagree with it.
+        -->
+        <div class="toolbar__align" role="group" aria-label="Align and distribute">
+          <button type="button" data-object-align="left" title="Align left edges">Align left</button>
+          <button type="button" data-object-align="center-h" title="Align horizontal centres">Align centre</button>
+          <button type="button" data-object-align="right" title="Align right edges">Align right</button>
+          <button type="button" data-object-align="top" title="Align top edges">Align top</button>
+          <button type="button" data-object-align="center-v" title="Align vertical centres">Align middle</button>
+          <button type="button" data-object-align="bottom" title="Align bottom edges">Align bottom</button>
+          <button type="button" data-object-distribute="horizontal" title="Distribute horizontal gaps evenly">Distribute H</button>
+          <button type="button" data-object-distribute="vertical" title="Distribute vertical gaps evenly">Distribute V</button>
+        </div>
         <div class="toolbar__history" role="group" aria-label="History">
           <button type="button" data-edit="undo" title="Undo (Ctrl+Z)">Undo</button>
           <button type="button" data-edit="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>

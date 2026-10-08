@@ -34,10 +34,17 @@
 import { identity } from '../core/geom/mat2d';
 import { unionRects } from '../core/geom/rect';
 import type { Vec2 } from '../core/geom/mat2d';
-import type { Document, ImageNode, Node as ModelNode, ShapeKind, Transform2D } from '../model/types';
+import type { Document, GroupNode, ImageNode, Node as ModelNode, ShapeKind, Transform2D } from '../model/types';
 import { createAssetFrom, hasAsset, orphanAssetIds } from '../model/assets';
 import type { AssetState } from '../model/assets';
 import { deriveAssetState } from '../render/types/image';
+import {
+  arrangementDeltas,
+  arrangeTargets,
+  describeArrange,
+  translatedTransform,
+  type ArrangeOperation,
+} from '../model/arrange';
 import { createId } from '../core/ids';
 import { createTransform } from '../model/factory';
 import { localMatrix, paintedBounds } from '../model/transform';
@@ -53,6 +60,7 @@ import {
   angleTo,
   HANDLE_UNITS,
   moveTransform,
+  pageDeltaToParentDelta,
   resizeTransform,
   rotateTransform,
   selectionCentre,
@@ -98,7 +106,21 @@ interface Rect {
 type Gesture =
   | { kind: 'idle' }
   | { kind: 'marquee'; pageId: string; origin: Vec2; additive: boolean }
-  | { kind: 'move'; origin: Vec2; start: ReadonlyMap<string, Transform2D> }
+  | {
+      kind: 'move';
+      origin: Vec2;
+      /**
+       * Each selected node's transform *and its ancestor chain*.
+       *
+       * The chain is carried because `x`/`y` are parent-local: converting the gesture's page-space
+       * delta into the delta this node's transform understands requires the parent matrix. Carrying
+       * only the transform is what made a nested drag drift along its group's local axis.
+       */
+      start: ReadonlyMap<
+        string,
+        { transform: Transform2D; ancestors: readonly GroupNode[] }
+      >;
+    }
   | {
       kind: 'resize';
       handle: HandleDirection;
@@ -575,6 +597,68 @@ export class Editor {
     }));
 
     this.setSelection({ ...emptySelection(), ids: new Set([node.id]), primary: node.id });
+    this.onChange();
+  }
+
+  /**
+   * Aligns or distributes the selection, as one undo step.
+   *
+   * ## Why a batch of `setTransform` rather than a new command
+   *
+   * Because the mutation path is the existing one. Each object gets one `setTransform`, and the batch is
+   * one history entry with one label -- the same shape `restack` uses, and for the same reason (a
+   * multi-object operation must not produce one undo step per object). A new `align` command in
+   * `model/commands.ts` would have to reimplement `mapNodesById`, the merge-and-compare that makes
+   * "set X to the value it already has" a no-op, and the no-op detection in `isNoop` -- a second
+   * implementation of all three, free to disagree with the originals.
+   *
+   * ## Why the geometry is not here
+   *
+   * `model/arrange.ts` owns it. This method only resolves the selection to targets, converts page-space
+   * deltas into each node's parent-local delta, and hands the result to the existing command funnel.
+   *
+   * ## No-op
+   *
+   * Two layers, and both are needed. If the operation cannot apply -- fewer than two objects to align,
+   * fewer than three to distribute -- it returns before any command is built. If it *can* apply but moves
+   * nothing -- everything already aligned, which is the common case for a user who clicks align twice --
+   * then every patch is a no-op, `setTransform` returns the same node references, `apply` returns the same
+   * document, and `store.mutate` records nothing. So there is no empty undo step and the label never
+   * reads "Align 3" for a change that did not happen.
+   *
+   * ## Selection
+   *
+   * Unchanged, and deliberately so: alignment moves objects, it does not re-select them, and the ids it
+   * was given are still the ids afterwards. That is what lets a user align twice in a row -- the second
+   * click is a no-op, correctly, rather than a selection that has moved out from under them.
+   */
+  arrange(operation: ArrangeOperation): void {
+    const targets = arrangeTargets(this.doc, this.selection.ids);
+    const deltas = arrangementDeltas(targets, operation);
+    // `null` means the operation cannot apply at all -- too few objects. Distinct from an empty map,
+    // which would mean "applies and moves nothing".
+    if (deltas === null) return;
+
+    const label = describeArrange(operation, targets.length);
+    const cmds: Command[] = [];
+    for (const target of targets) {
+      const deltaPage = deltas.get(target.id);
+      // A group that is already where it belongs gets no entry at all, rather than a zero-delta patch.
+      if (deltaPage === undefined || (deltaPage.x === 0 && deltaPage.y === 0)) continue;
+      cmds.push({
+        type: 'setTransform',
+        ids: [target.id],
+        patch: translatedTransform(
+          target.transform,
+          // Page space to parent-local, the same conversion the move gesture uses. Identity at depth 0.
+          pageDeltaToParentDelta(target.ancestors, deltaPage),
+        ),
+      });
+    }
+    if (cmds.length === 0) return;
+
+    this.store.mutate(label, () => ({ type: 'batch', cmds }));
+    this.redrawOverlay();
     this.onChange();
   }
 
@@ -1163,7 +1247,7 @@ export class Editor {
   }
 
   private startMove(origin: Vec2): void {
-    const start = this.captureTransforms();
+    const start = this.captureMovableTransforms();
     if (start.size === 0) return;
     this.store.beginTransaction({ label: `Move ${countLabel(start.size)}`, mergeKey: GESTURE_KEY });
     this.gesture = { kind: 'move', origin, start };
@@ -1194,6 +1278,21 @@ export class Editor {
     return map;
   }
 
+  /**
+   * Captures each selected node's transform **together with its ancestor chain**.
+   *
+   * `captureTransforms` alone is not enough to move anything: `Transform2D.x/y` are parent-local, so
+   * a page-space delta needs the parent matrix to become a local one, and that matrix is reachable
+   * only from the placement. See `pageDeltaToParentDelta`.
+   */
+  private captureMovableTransforms(): Map<string, { transform: Transform2D; ancestors: readonly GroupNode[] }> {
+    const map = new Map<string, { transform: Transform2D; ancestors: readonly GroupNode[] }>();
+    for (const { node, placement } of selectedPlacements(this.doc, this.selection)) {
+      map.set(node.id, { transform: node.transform, ancestors: placement.ancestors });
+    }
+    return map;
+  }
+
   private applyMove(pagePoint: Vec2, shiftKey: boolean): void {
     const gesture = this.gesture;
     if (gesture.kind !== 'move') return;
@@ -1209,11 +1308,17 @@ export class Editor {
     }
 
     const cmds: Command[] = [];
-    for (const [id, transform] of gesture.start) {
+    for (const [id, entry] of gesture.start) {
       cmds.push({
         type: 'setTransform',
         ids: [id],
-        patch: moveTransform(transform, { x: dx, y: dy }),
+        // `dx`/`dy` are page-space; the transform is parent-local. The conversion is identity at
+        // depth 0, so a top-level object moves exactly as before, and correct one level down, where
+        // adding the page delta directly moved the child along its group's local axis instead.
+        patch: moveTransform(
+          entry.transform,
+          pageDeltaToParentDelta(entry.ancestors, { x: dx, y: dy }),
+        ),
       });
     }
     this.store.dispatch({ type: 'batch', cmds }, { mergeKey: GESTURE_KEY });

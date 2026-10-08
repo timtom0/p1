@@ -10,11 +10,11 @@
  * as soon as rotation is non-zero, which is the bug this structure avoids.
  */
 
-import { applyPoint, invert, multiply, rotation, scaling } from '../core/geom/mat2d';
-import type { Vec2 } from '../core/geom/mat2d';
+import { applyPoint, identity, invert, multiply, rotation, scaling } from '../core/geom/mat2d';
+import type { Mat2D, Vec2 } from '../core/geom/mat2d';
 import type { Rect } from '../core/geom/rect';
-import type { Transform2D } from '../model/types';
-import { worldMatrix } from '../model/transform';
+import type { GroupNode, Transform2D } from '../model/types';
+import { worldMatrix, worldMatrixIn } from '../model/transform';
 
 export type HandleDirection = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -172,6 +172,59 @@ export function resizeTransform(
 /** Translates a transform by a delta in the parent's space. */
 export function moveTransform(transform: Transform2D, deltaParent: Vec2): Transform2D {
   return { ...transform, x: transform.x + deltaParent.x, y: transform.y + deltaParent.y };
+}
+
+/**
+ * Composes a node's **parent** world matrix from its ancestor chain, outermost first.
+ *
+ * Identity for a node whose parent is the page, which is the depth-0 case every top-level object
+ * lives in. The chain is composed with `worldMatrixIn`, which is the one established composition
+ * order in the codebase (ADR 0011 §6) -- the parent's map is the left factor. Writing this as a
+ * separate accumulation would be exactly the second transform system ADR 0011b §2 warns against.
+ */
+function parentWorldMatrix(ancestors: readonly GroupNode[]): Mat2D {
+  let world = identity();
+  for (const ancestor of ancestors) {
+    world = worldMatrixIn(ancestor.transform, world);
+  }
+  return world;
+}
+
+/**
+ * Converts a **page-space** translation into the **parent-local** translation that produces it.
+ *
+ * ## Why this exists
+ *
+ * `Transform2D.x/y` are the node's position *in its parent's space*, but every user-facing gesture
+ * and every alignment operation is expressed in page space -- the space the pointer, the painted
+ * bounds and the selection outline all live in. Adding a page-space delta straight onto `x/y` is
+ * only correct when the parent is the page, i.e. at depth 0, where the parent matrix is the
+ * identity. One level down it is wrong: a child of a group rotated by `t` asked to move `d` page
+ * pixels along x moves `d·cos t` along page x instead, drifting off at an angle.
+ *
+ * Measured, before this helper existed: a child of a group rotated 45°, asked for `+40` page px,
+ * moved its painted bounds by **28.2843** -- exactly `40·cos 45°`.
+ *
+ * ## Why the inverse rather than a hand-rolled `R(-t)/s`
+ *
+ * The chain is already composed by {@link parentWorldMatrix} and inverted by `invert`, both of which
+ * are the primitives the rest of the renderer uses. Spelling the inverse out by hand would be a
+ * second derivation of the same algebra, free to disagree with `worldMatrix` about composition
+ * order -- the single defect ADR 0011b §2 calls "the worst possible arrangement".
+ *
+ * A translation is applied to two points and subtracted rather than to the origin, because
+ * `applyPoint` is the affine form and the difference of two affine images of two points differing by
+ * `deltaPage` is exactly the local vector that maps to it.
+ */
+export function pageDeltaToParentDelta(
+  ancestors: readonly GroupNode[],
+  deltaPage: Vec2,
+): Vec2 {
+  if (ancestors.length === 0) return deltaPage;
+  const inverse = invert(parentWorldMatrix(ancestors));
+  const from = applyPoint(inverse, { x: 0, y: 0 });
+  const to = applyPoint(inverse, deltaPage);
+  return { x: to.x - from.x, y: to.y - from.y };
 }
 
 /**

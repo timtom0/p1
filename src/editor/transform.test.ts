@@ -5,13 +5,14 @@
  * bug is immediately visible; a resize-under-rotation bug drifts by a fraction of a
  * pixel and is invisible until it is someone's anchor point in the wrong place.
  * These tests therefore assert on the *anchor staying put*, not on the resulting
- * numbers — the numbers are an output of that property, not the property itself.
+ * numbers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the numbers are an output of that property, not the property itself.
  */
 
 import { describe, expect, it } from 'vitest';
-import type { Transform2D } from '../model/types';
+import type { Document, GroupNode, ShapeNode, Transform2D } from '../model/types';
 import { createTransform } from '../model/factory';
-import { worldMatrix } from '../model/transform';
+import { paintedBounds, worldMatrix } from '../model/transform';
+import { placementsInDocument } from '../model/tree';
 import { applyPoint } from '../core/geom/mat2d';
 import type { Vec2 } from '../core/geom/mat2d';
 import {
@@ -23,6 +24,7 @@ import {
   scaleTransforms,
   selectionCentre,
   modelFrameUnion,
+  pageDeltaToParentDelta,
   snapAngle,
 } from './transform';
 
@@ -81,7 +83,7 @@ describe('resizeTransform', () => {
     expect(toParent(resized, { x: 200, y: 100 }).x).toBeCloseTo(right.x);
   });
 
-  it('keeps the anchor fixed under rotation — the case axis-aligned maths gets wrong', () => {
+  it('keeps the anchor fixed under rotation ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the case axis-aligned maths gets wrong', () => {
     const t = box({ rotation: Math.PI / 6 });
     const anchor = toParent(t, { x: 0, y: 0 });
     const resized = resizeTransform(t, 'se', toParent(t, { x: 240, y: 150 }));
@@ -98,7 +100,7 @@ describe('resizeTransform', () => {
     const resized = resizeTransform(t, 'nw', toParent(t, { x: -20, y: 10 }));
 
     // The anchor is the bottom-right corner. After resizing from the *top-left* it
-    // is no longer at (200, 100) in the new box — it is at the new bottom-right.
+    // is no longer at (200, 100) in the new box ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it is at the new bottom-right.
     // Asserting against the stale local coordinates is the mistake this test is
     // shaped to catch.
     expect(resized.width).toBeCloseTo(220);
@@ -125,7 +127,7 @@ describe('resizeTransform', () => {
   });
 
   it('combines rotation and non-uniform scale without letting the anchor drift', () => {
-    // The only configuration in which the R·S versus S·R question arises. Every
+    // The only configuration in which the RÃƒâ€šÃ‚Â·S versus SÃƒâ€šÃ‚Â·R question arises. Every
     // other case in this file has a uniform scale or a zero rotation, where the two
     // orders happen to agree.
     const t = box({ rotation: 0.7, scaleX: 2, scaleY: 0.5 });
@@ -215,7 +217,7 @@ describe('angleTo', () => {
 });
 
 describe('snapAngle', () => {
-  it('snaps to 15° by default', () => {
+  it('snaps to 15Ãƒâ€šÃ‚Â° by default', () => {
     expect(snapAngle(Math.PI / 12 + 0.01)).toBeCloseTo(Math.PI / 12);
     expect(snapAngle(Math.PI / 6)).toBeCloseTo(Math.PI / 6);
   });
@@ -278,7 +280,7 @@ describe('scaleTransforms', () => {
     // The correct result does not exist in this model. Scaling a rotated box about a page-frame
     // pivot by (a, b) requires a linear part `diag(a, b) * R(t) * S(sx, sy)` whose columns are
     // non-perpendicular -- a shear -- and `Transform2D` has no parameter for one. That is
-    // ADR 0008 §4's proof, and it is the reason multi-object resize is deferred rather than
+    // ADR 0008 Ãƒâ€šÃ‚Â§4's proof, and it is the reason multi-object resize is deferred rather than
     // unimplemented.
     //
     // So this is documented rather than fixed, and the reason it is *safe* to leave is stated
@@ -327,5 +329,182 @@ describe('scaleTransforms', () => {
       // the same obstruction under a group parent.
       expect(Math.abs(Math.cos(rotated.rotation))).toBeGreaterThan(0);
     });
+  });
+});
+
+/**
+ * The page-space to parent-local delta conversion (M16, ADR 0016).
+ *
+ * Added after a real defect. `applyMove` added a page-space delta straight onto `Transform2D.x/y`, which
+ * are parent-local, so the conversion was skipped whenever the parent was not the page. A child of a group
+ * rotated 45 degrees, dragged `+40` page px along x, moved its painted bounds by **28.2843** -- exactly
+ * `40 * cos 45` -- and drifted off at an angle while the drag looked like it had worked.
+ *
+ * ## The property asserted throughout
+ *
+ * **Applying the converted delta to a node's transform moves that node's painted bounds by exactly the
+ * page-space delta asked for.** Measured with `paintedBounds` on a real placement, never by comparing the
+ * returned numbers -- the returned numbers are an output of that property, not the property itself.
+ *
+ * The measurement has to go through a document. A `Transform2D` knows nothing about its parent, so
+ * `paintedBounds(child.transform)` is the box the child *would* paint if it sat on the page, with no
+ * parent rotation or scale in it at all. Composing the parent in is the whole subject, so the fixtures
+ * here are real groups wrapping a real leaf.
+ */
+describe('pageDeltaToParentDelta', () => {
+  const child = (x: number, y: number, rotation = 0): Transform2D =>
+    createTransform({ x, y, width: 80, height: 60, rotation, scaleX: 1, scaleY: 1 });
+
+  const groupNode = (id: string, x: number, y: number, rotation = 0, scale = 1): GroupNode =>
+    ({
+      type: 'group',
+      id,
+      name: id,
+      transform: createTransform({ x, y, width: 0, height: 0, rotation, scaleX: scale, scaleY: scale }),
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      children: [],
+    }) as unknown as GroupNode;
+
+  const leafNode = (transform: Transform2D): ShapeNode =>
+    ({
+      type: 'shape',
+      id: 'leaf',
+      name: 'leaf',
+      transform,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      shape: { kind: 'rect', cornerRadius: 0 },
+    }) as unknown as ShapeNode;
+
+  /**
+   * Nests `groups` outermost-first around the leaf, so `groups[0]` is the page's direct child and the
+   * last entry owns the leaf. An empty list puts the leaf straight on the page -- depth 0.
+   */
+  function buildDoc(groups: readonly GroupNode[], leaf: Transform2D): Document {
+    // Built back to front, and each group holds the *nested* result rather than the original node --
+    // holding the original would leave every inner group with `children: []` and the leaf unreferenced.
+    const nest: GroupNode[] = [];
+    for (let index = groups.length - 1; index >= 0; index -= 1) {
+      nest.unshift({
+        ...groups[index]!,
+        children: [index === groups.length - 1 ? leafNode(leaf) : nest[0]!],
+      } as unknown as GroupNode);
+    }
+    return {
+      formatVersion: 2,
+      id: 'd',
+      name: 'D',
+      pageSize: { width: 600, height: 450, unit: 'pt', orientation: 'portrait' },
+      assets: {},
+      pages: [
+        {
+          id: 'p1',
+          name: '1',
+          background: { type: 'solid', color: '#ffffff' },
+          objects: nest.length === 0 ? [leafNode(leaf)] : [nest[0]!],
+        },
+      ],
+    } as unknown as Document;
+  }
+
+  /** The leaf's painted box, through a real placement so the ancestor chain is composed in. */
+  function paintedBox(groups: readonly GroupNode[], leaf: Transform2D) {
+    const placement = placementsInDocument(buildDoc(groups, leaf)).find(
+      (p) => p.node.id === 'leaf',
+    );
+    if (placement === undefined) throw new Error('the leaf did not resolve to a placement');
+    return paintedBounds(placement.transform);
+  }
+
+  /** The leaf's ancestor chain, read from the document rather than assumed. */
+  function chainOf(groups: readonly GroupNode[], leaf: Transform2D): readonly GroupNode[] {
+    return placementsInDocument(buildDoc(groups, leaf)).find((p) => p.node.id === 'leaf')!.ancestors;
+  }
+
+  /** Applies the conversion exactly as the editor does, then measures the painted displacement. */
+  function displacement(
+    groups: readonly GroupNode[],
+    leaf: Transform2D,
+    deltaPage: Vec2,
+  ): Vec2 {
+    const deltaParent = pageDeltaToParentDelta(chainOf(groups, leaf), deltaPage);
+    const before = paintedBox(groups, leaf);
+    const after = paintedBox(groups, moveTransform(leaf, deltaParent));
+    return { x: after.x - before.x, y: after.y - before.y };
+  }
+
+  it('is the identity at depth 0, so top-level objects are unaffected', () => {
+    const delta = { x: 40, y: -25 };
+    expect(pageDeltaToParentDelta([], delta)).toEqual(delta);
+    const moved = displacement([], child(100, 100), delta);
+    expect(moved.x).toBeCloseTo(40, 9);
+    expect(moved.y).toBeCloseTo(-25, 9);
+  });
+
+  it('undoes a group rotation, so the child follows the page axis', () => {
+    const groups = [groupNode('g', 200, 150, Math.PI / 4)];
+    const moved = displacement(groups, child(40, 40), { x: 40, y: 0 });
+    expect(moved.x, 'a page-space x delta moves the painted box by exactly that').toBeCloseTo(40, 9);
+    expect(moved.y).toBeCloseTo(0, 9);
+  });
+
+  it('undoes a group rotation and scale together', () => {
+    const groups = [groupNode('g', 200, 150, 0.4, 1.2)];
+    const moved = displacement(groups, child(40, 40), { x: 40, y: 0 });
+    expect(moved.x).toBeCloseTo(40, 9);
+    expect(moved.y).toBeCloseTo(0, 9);
+    // Skipping the conversion would have painted `40 * 1.2 * cos(0.4)^2` = 40.71 along page x, so the two
+    // answers differ by 0.71 and this is not a case where they agree by accident.
+    expect(Math.abs(moved.x - 40 * 1.2 * Math.cos(0.4) ** 2)).toBeGreaterThan(0.5);
+  });
+
+  it('composes a two-level ancestor chain', () => {
+    const groups = [groupNode('outer', 120, 90, 0.3, 1.1), groupNode('inner', 30, 20, -0.2, 1.4)];
+    const moved = displacement(groups, child(20, 20), { x: 30, y: -20 });
+    expect(moved.x).toBeCloseTo(30, 9);
+    expect(moved.y).toBeCloseTo(-20, 9);
+  });
+
+  it('does not care about the child own rotation, because translation commutes with rotation', () => {
+    for (const childRotation of [0, 0.3, Math.PI / 4, -0.9]) {
+      const groups = [groupNode('g', 200, 150, 0.4, 1.2)];
+      const moved = displacement(groups, child(40, 40, childRotation), { x: 25, y: 15 });
+      expect(moved.x, `child rotation ${childRotation}`).toBeCloseTo(25, 9);
+      expect(moved.y, `child rotation ${childRotation}`).toBeCloseTo(15, 9);
+    }
+  });
+
+  it('preserves the direction of a diagonal page delta through a chain', () => {
+    const groups = [groupNode('outer', 200, 150, 0.4, 1.2), groupNode('inner', 30, 20, -0.2, 1.4)];
+    const moved = displacement(groups, child(20, 20), { x: 12, y: -34 });
+    expect(moved.x).toBeCloseTo(12, 9);
+    expect(moved.y).toBeCloseTo(-34, 9);
+  });
+
+  it('ignores a translation-only offset, because a vector conversion must not pick one up', () => {
+    // Parent space and page space differ here only by an offset. A conversion that mapped *points*
+    // rather than *vectors* would be wrong by exactly that offset -- which is why the helper differences
+    // two images of `applyPoint` instead of transforming the origin.
+    const groups = [groupNode('g', 500, 400, 0, 1)];
+    const moved = displacement(groups, child(40, 40), { x: 17, y: 23 });
+    expect(moved.x).toBeCloseTo(17, 9);
+    expect(moved.y).toBeCloseTo(23, 9);
+  });
+
+  it('translates only: the painted box keeps its size', () => {
+    const groups = [groupNode('g', 200, 150, 0.4, 1.2)];
+    const leaf = child(40, 40, 0.3);
+    const before = paintedBox(groups, leaf);
+    const after = paintedBox(
+      groups,
+      moveTransform(leaf, pageDeltaToParentDelta(chainOf(groups, leaf), { x: 25, y: 15 })),
+    );
+    expect(after.width).toBeCloseTo(before.width, 9);
+    expect(after.height).toBeCloseTo(before.height, 9);
   });
 });
