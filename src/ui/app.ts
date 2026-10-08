@@ -25,6 +25,11 @@ import type { RestackDirection } from '../model/commands';
 import type { Vec2 } from '../core/geom/mat2d';
 import { importImageFile } from '../render/assets';
 import { createSampleDocument } from '../model/factory';
+import {
+  observeRenderedPages,
+  publishBootDiagnostics,
+  recordBootStep,
+} from './boot-diagnostics';
 import { pageExtentPx } from '../model/page';
 import { validateDocument } from '../model/invariants';
 import { placementsInDocument } from '../model/tree';
@@ -136,6 +141,11 @@ function main(): void {
   const imageInput = queryRequired<HTMLInputElement>('[data-file-input="image"]');
 
   const store = new DocStore(window.__P1_FIXTURE__?.() ?? createSampleDocument());
+  recordBootStep('store:ready', {
+    pages: store.state.pages.length,
+    objects: store.state.pages.reduce((total, page) => total + page.objects.length, 0),
+    fromFixture: window.__P1_FIXTURE__ !== undefined,
+  });
 
   /**
    * The document, read from the store on every use rather than mirrored locally.
@@ -233,6 +243,7 @@ function main(): void {
   /** Project the current model into the DOM, then tell the viewport the extent. */
   function project(): void {
     const current = doc();
+    recordBootStep('project:enter', { pages: current.pages.length });
 
     const violations = validateDocument(current);
     if (violations.length > 0) {
@@ -241,7 +252,22 @@ function main(): void {
 
     // `DocumentView` already knows which node the fence covers — the controller
     // marks it through `setTextEditing`. The render call therefore needs no hint.
+    //
+    // The two steps around this call are the boundaries that distinguish the boot failure modes:
+    // "render never entered", "render returned having produced no page", and "the page was produced
+    // and later removed" are indistinguishable from the DOM alone. See `boot-diagnostics.ts`.
+    recordBootStep('render:enter', { pages: current.pages.length });
     view.render(current, PAGE_GAP);
+    recordBootStep('render:return', {
+      // Three counts that are easy to confuse and were: the first version of this step called the
+      // `[data-objects]` count `objects`, which reads as "the document's objects" and is not -- it is
+      // one container per page. Naming it `pageCount` says what was counted. The real leaf count is
+      // kept beside it under its own name, because "how many objects did render produce" is the
+      // question a reader actually has when a boot stalls.
+      pageElements: observeRenderedPages(),
+      pageCount: document.querySelectorAll('[data-objects]').length,
+      leaves: placementsInDocument(current).length,
+    });
 
     const page = pageExtentPx(current.pageSize);
     viewport.setContent(
@@ -397,10 +423,20 @@ function main(): void {
   }
 
   // ---- initial paint -------------------------------------------------------
+  recordBootStep('boot:paint:begin', { pages: doc().pages.length });
   project();
+  recordBootStep('viewport.fit:enter');
   viewport.fit();
+  recordBootStep('viewport.fit:return');
   viewport.observeResize();
   statusZoom.textContent = `${Math.round(viewport.zoom * 100)}%`;
+  // The last step, and the one the harness should be able to wait on directly. Everything above is
+  // recorded so a run that never reaches this line can say which transition it stopped at.
+  recordBootStep('boot:complete', {
+    pageElements: observeRenderedPages(),
+    leaves: placementsInDocument(doc()).length,
+    readout: statusZoom.textContent ?? null,
+  });
 
   // Delegated on the document, not the buttons: the label text is inside the
   // button, so `event.target` is usually a text node's element, not the button.
@@ -683,4 +719,6 @@ function main(): void {
   });
 }
 
+publishBootDiagnostics();
+recordBootStep('main:enter');
 main();

@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Test fixtures and helpers for the renderer verification suite.
@@ -15,6 +17,15 @@ import { expect, test, type Page } from '@playwright/test';
  *
  * The injected path deliberately reuses the app's own composition root rather than
  * reimplementing rendering, so a fixture can never pass while the real app fails.
+ *
+ * ## Readiness
+ *
+ * `waitForApp` waits for the app's own `boot:complete` step. An earlier version waited on
+ * `readout.value !== ''` plus a `[data-page]` element, documenting the readout as "only populated
+ * after `project()` and `viewport.fit()` run -- a reliable end-of-boot marker". That was false:
+ * `index.html` ships the readout pre-populated with `100%`. The term was therefore always true and
+ * contributed nothing while looking like corroboration, and it made a boot that never *started*
+ * indistinguishable from one that started and stalled. See `src/ui/boot-diagnostics.ts`.
  *
  * ## Zoom normalisation
  *
@@ -78,7 +89,23 @@ export const FIT_PADDING = 48;
  * diagnosis. So a failure here now reports the page's own errors, which is the only
  * thing that would settle it next time.
  */
-async function waitForApp(page: Page): Promise<void> {
+/**
+ * The boot budget. Fixed by policy and not tuned: it exists so a stalled boot is
+ * reported rather than waited on forever.
+ */
+export const BOOT_TIMEOUT_MS = 15_000;
+
+/**
+ * Waits until the app has booted.
+ *
+ * Readiness is the product's own `boot:complete` step, published on `__P1_BOOT__`.
+ * It cannot be half-true, which matters because the check it replaced could be.
+ *
+ * `timeoutMs` is injectable so tests can exercise the failure path -- which is the
+ * path this milestone exists to understand -- without spending the real 15s
+ * budget on every such test. Production callers take the default.
+ */
+export async function waitForApp(page: Page, timeoutMs: number = BOOT_TIMEOUT_MS): Promise<void> {
   const errors: string[] = [];
   const record = (message: string): void => {
     errors.push(message);
@@ -92,30 +119,73 @@ async function waitForApp(page: Page): Promise<void> {
   );
 
   try {
+    // Readiness is the **app's own** `boot:complete` step, not a conjunction of DOM side-effects.
+    //
+    // The old condition required `readout.value !== ''`, documented here as "only happens after
+    // `project()` and `viewport.fit()` run — a reliable end-of-boot marker". **That was false.**
+    // `index.html` ships `<output data-zoom-readout>100%</output>` as static markup, so the value was
+    // `"100%"` before a single line of application JavaScript ran. The condition was therefore always
+    // half-true, and its second half — a `[data-page]` element — was the only thing doing any work.
+    //
+    // That is not a cosmetic correction. The one recorded occurrence of this failure reported
+    // `readout: "100%"` alongside `pages: 0`, which I first read as a contradiction and built a whole
+    // diagnosis on: an app that had painted chrome but no document. The trace settled it — the module
+    // graph had loaded 23 of its ~49 modules and then stalled, so `app.ts` had never been evaluated
+    // and the readout was the HTML default. A readiness check that cannot tell "booted" from "never
+    // started" is the defect that made this undiagnosable, so the predicate now waits on a signal the
+    // product sets itself, at one step, which cannot be half-true.
     await page.waitForFunction(
       () => {
-        const readout = document.querySelector('[data-zoom-readout]');
+        const surface = (window as unknown as Record<string, unknown>)['__P1_BOOT__'] as
+          | { read: () => { timeline: { step: string }[] } }
+          | undefined;
         return (
-          readout instanceof HTMLOutputElement &&
-          readout.value !== '' &&
-          document.querySelectorAll('[data-page]').length > 0
+          surface !== undefined &&
+          surface.read().timeline.some((entry) => entry.step === 'boot:complete')
         );
       },
       undefined,
-      { timeout: 15_000 },
+      { timeout: timeoutMs },
     );
   } catch (cause) {
     const state = await page
-      .evaluate(() => ({
-        pages: document.querySelectorAll('[data-page]').length,
-        objects: document.querySelectorAll('[data-objects]').length,
-        readout:
-          (document.querySelector('[data-zoom-readout]') as HTMLOutputElement | null)?.value ??
-          null,
-      }))
+      .evaluate(() => {
+        const surface = (window as unknown as Record<string, unknown>)['__P1_BOOT__'] as
+          | { read: () => unknown }
+          | undefined;
+        return {
+          pages: document.querySelectorAll('[data-page]').length,
+          objects: document.querySelectorAll('[data-objects]').length,
+          readout:
+            (document.querySelector('[data-zoom-readout]') as HTMLOutputElement | null)?.value ??
+            null,
+          // The product's own account of what it did during boot. Present only if the module loaded.
+          boot: surface === undefined ? 'no boot surface' : (surface.read() ?? null),
+        };
+      })
       .catch(() => null);
+    // Appended, never overwritten.
+    //
+    // Playwright wipes `test-results/` at the start of each run, so a snapshot of the one run that
+    // reproduced this is gone by the time anyone goes looking -- which is exactly what happened: the
+    // error-context file from the real reproduction was overwritten by later clean runs before it was
+    // read. This log is append-only and survives, so the *first* failure is preserved no matter how
+    // many clean runs follow.
+    const record = JSON.stringify({ when: new Date().toISOString(), state, errors });
+    try {
+      appendFileSync(join(process.cwd(), 'test-results', 'boot-failures.jsonl'), `${record}\n`);
+    } catch {
+      // Recording is best-effort and must never replace the real failure with a different one.
+    }
+    // The message names which of the two states was reached, because they have different causes and a
+    // single message made them indistinguishable: a module graph that stalled before evaluating
+    // `app.ts`, and a boot that started and did not finish.
+    const surfaceMissing =
+      typeof state === 'object' && state !== null && state.boot === 'no boot surface';
     throw new Error(
-      `The app did not finish booting: no [data-page] within 15s.\n` +
+      (surfaceMissing
+        ? 'The app module never evaluated: the page loaded but the module graph did not finish.\n'
+        : `The app started but did not reach boot:complete within ${timeoutMs / 1000}s.\n`) +
         `  page state: ${JSON.stringify(state)}\n` +
         `  page errors: ${errors.length === 0 ? '(none reported)' : errors.slice(0, 8).join('\n    ')}`,
       { cause },
