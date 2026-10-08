@@ -567,14 +567,32 @@ describe('distribution', () => {
 
     const a = arrangementDeltas(forward, distribute('horizontal'))!;
     const b = arrangementDeltas(reversed, distribute('horizontal'))!;
-    for (const id of ['m', 'z', 'a']) {
-      expect(a.get(id)?.x, `${id} is placed identically regardless of input order`).toBeCloseTo(
-        b.get(id)?.x ?? Number.NaN,
-        9,
-      );
-    }
-    // And with the tie-break removed the two would differ, because `z` and `m` would swap.
-    expect(a.get('m')?.x).not.toBeCloseTo(a.get('z')?.x ?? Number.NaN, 6);
+
+    // **Only the middle box moves.** `distributionDeltas` records `sorted.slice(1, -1)`, and `record`
+    // drops exact zeros, so both anchors are absent from the map *by construction* rather than present
+    // with a zero delta. Asserting the key set is therefore part of the contract under test, not a detail
+    // -- and it is why this test may not read `.get(id)?.x` for an anchor.
+    //
+    // The expected delta is derived, not fitted. `m` wins the tie on id, so it is the first anchor at 40,
+    // and `a` is the last at 200 with extent 50. Span is therefore 210, total extent is 60 + 80 + 50 = 190,
+    // and `gap = (210 - 190) / (3 - 1) = 10`. The cursor leaves `m` at `40 + 60 + 10 = 110`, which is 70
+    // past `z`'s near edge of 40.
+    expect([...a.keys()], 'only the middle box moves; both anchors are omitted').toEqual(['z']);
+    expect(a.get('z')?.x, 'z moves to the equal-gap position, 70px along the axis').toBeCloseTo(70, 9);
+    expect(a.get('z')?.y, 'distribution along one axis leaves the other alone').toBe(0);
+    expect(a.has('m'), 'm won the tie on id, so it is an anchor and never a delta').toBe(false);
+    expect(a.has('a'), 'a is the far anchor').toBe(false);
+
+    // Had the tie been broken by input order instead, `z` would anchor and `m` would be the middle box:
+    // span and total are unchanged, but the cursor would leave `z` at `40 + 80 + 10 = 130`, recording
+    // **90 on `m`** instead. Both facts are asserted above, so removing the tie-break fails this test
+    // rather than quietly reordering a result nobody inspects.
+    //
+    // And the point of the exercise: input order does not change the outcome.
+    expect(
+      [...b.entries()],
+      'the reversed input produces exactly the same deltas',
+    ).toEqual([...a.entries()]);
   });
 
   it('translates only, and preserves each box size', () => {
