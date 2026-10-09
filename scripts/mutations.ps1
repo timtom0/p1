@@ -28,6 +28,30 @@
 # worth checking are the ones whose wording implies a mechanism this reconstruction had to infer:
 # "the parser shares nested objects with its input", "optional properties are materialised instead
 # of left absent", and "the dirty indicator is laid out with padding again".
+# --- Accepted survivors ----------------------------------------------------------------
+#
+# A mutation that no test can kill is either a coverage gap or an equivalent mutant, and the two deserve
+# opposite responses: a gap should be closed, an equivalent mutant should be recorded and never counted
+# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 96 undetected"
+# is a decision rather than an oversight -- and so that the next milestone inherits a known quantity instead
+# of rediscovering it.
+#
+# **1. `the dirty indicator is laid out with padding again (resizes every baseline)`** — `src/ui/styles.css`,
+#    target `tests/editor/persistence.spec.ts`.
+#
+#    The substitution replaces `box-shadow: inset 0 0 0 1px` with a `1px` border plus `1px` padding, which
+#    grows the dirty badge by two pixels in each direction. It survives because **no test in the suite
+#    asserts that element's geometry**: `persistence.spec.ts` checks dirty state behaviourally, and nothing
+#    anywhere measures the badge's box.
+#
+#    The only way to detect it is a pixel baseline, and ADR 0011b section 8 established that the baselines
+#    here cannot see a sub-pixel chrome change -- so a baseline would report this mutant as detected while
+#    being unable to fail for the right reason, which is the specific outcome this tool exists to avoid.
+#
+#    It is therefore a genuine, accepted coverage gap rather than a defect in the product: the CSS is
+#    correct, and the change the mutant makes is cosmetic and unobservable to the assertions that exist.
+#    Accepted through M16 and M17. If a test ever asserts the badge's rendered size, remove this entry and
+#    expect the mutant to die.
 
 # --- M0-M7: persistence and the format ------------------------------------------------
 # The rule this whole file exists to enforce: an untrusted `.p1doc` must be refused at load with a
@@ -567,3 +591,100 @@ Add-Mutation 'the ancestor chain ignores the outermost group' `
   'src\editor\transform.ts' `
   { param($t) $t.Replace('  for (const ancestor of ancestors) {', '  for (const ancestor of ancestors.slice(1)) {') } `
   'src/editor/transform.test.ts'
+
+# --- M17 -- snapping and guides ---------------------------------------------------------
+#
+# Covers `model/snap.ts` (the pure calculation, the zoom conversion, target selection) and the gesture
+# integration in `editor/editor.ts` (the captured box, Alt suppression, guide lifetime).
+#
+# Three of these exist specifically to pin the F21 defect, which was invisible to the unit suite because
+# the pure engine was always correct and only the *integration* re-read the document. A mutation corpus
+# that cannot express "the moving box is re-derived from the live document" cannot guard the fix.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'the threshold is a document-space constant instead of screen px divided by zoom' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('  return SNAP_THRESHOLD_SCREEN_PX / Math.max(zoom, Number.EPSILON);', '  return SNAP_THRESHOLD_SCREEN_PX;') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'the threshold multiplies by zoom instead of dividing (the screen px become document px)' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('  return SNAP_THRESHOLD_SCREEN_PX / Math.max(zoom, Number.EPSILON);', '  return SNAP_THRESHOLD_SCREEN_PX * Math.max(zoom, Number.EPSILON);') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'a candidate exactly at the threshold does not qualify (the boundary becomes exclusive)' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('      if (distance > threshold) continue;', '      if (distance >= threshold) continue;') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'the largest distance within the threshold wins instead of the smallest' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('      if (best === null || distance < Math.abs(best.delta)) {', '      if (best === null || distance > Math.abs(best.delta)) {') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'the tie-break keeps the later candidate rather than the first scanned' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('      if (best === null || distance < Math.abs(best.delta)) {', '      if (distance <= Math.abs(best?.delta ?? Number.POSITIVE_INFINITY)) {') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'page features are scanned after objects, so an exact tie goes to the movable one' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('  for (const entry of pageFeatures(pageRect, axis)) {', '  for (const entry of [] as readonly { feature: SnapFeature; position: number; targetId: null }[]) {') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'only one axis can snap at a time (a corner drag gets one guide instead of two)' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('    adjustment: { x: x === null ? 0 : x.delta, y: y === null ? 0 : y.delta },', '    adjustment: { x: x === null ? 0 : x.delta, y: 0 },') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'the vertical centre is not a snap feature' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace("        { feature: 'center-v', position: rect.y + rect.height / 2 },", '') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'a group is not offered as a snap target (allNodes yields leaves only)' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('    if (placement.ancestors.some((ancestor) => skip.has(ancestor.id))) continue;', '') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation "a selected group's members remain snap targets (self-snap through the group)" `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('    if (placement.ancestors.some((ancestor) => skip.has(ancestor.id))) continue;', '    if (false) continue;') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'translateBounds mutates the box it is given' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('  return { ...rect, x: rect.x + delta.x, y: rect.y + delta.y };', '  rect.x += delta.x; rect.y += delta.y; return rect;') } `
+  'src/model/snap.test.ts'
+
+Add-Mutation 'the moving arrangement is the last member instead of the union' `
+  'src\model\snap.ts' `
+  { param($t) $t.Replace('  return arrangeBounds(arrangeTargets(doc, ids));', '  const t = arrangeTargets(doc, ids); return t.length === 0 ? null : t[t.length - 1]!.painted;') } `
+  'src/model/snap.test.ts'
+
+# --- M17 gesture integration (browser) --------------------------------------------------
+
+Add-Mutation 'the move gesture re-derives its box from the live document each frame (the F21 defect)' `
+  'src\editor\editor.ts' `
+  { param($t) $t.Replace('      const unsnapped = translateBounds(gesture.bounds, { x: dx, y: dy });', '      const unsnapped = translateBounds(movingBounds(this.doc, gesture.start.keys()) ?? gesture.bounds, { x: dx, y: dy });') } `
+  'tests/editor/snap.spec.ts'
+
+Add-Mutation 'Alt does not suppress snapping' `
+  'src\editor\editor.ts' `
+  { param($t) $t.Replace('    if (!altKey && gesture.bounds !== null) {', '    if (gesture.bounds !== null) {') } `
+  'tests/editor/snap.spec.ts'
+
+Add-Mutation 'the threshold uses a fixed document-space constant, so zoom stops mattering' `
+  'src\editor\editor.ts' `
+  { param($t) $t.Replace('      threshold: snapThresholdDocument(this.viewport.zoom),', '      threshold: 10,') } `
+  'tests/editor/snap.spec.ts'
+
+Add-Mutation 'guides survive the end of a move gesture (the clearing in pointerUp is dropped)' `
+  'src\editor\editor.ts' `
+  { param($t) [regex]::Replace($t, '    this\.snapLines = \[\];', '', 1) } `
+  'tests/editor/snap.spec.ts'
+
+Add-Mutation 'a cancelled drag leaves its guide on the canvas' `
+  'src\editor\editor.ts' `
+  { param($t) [regex]::Replace($t, '    this\.snapLines = \[\];', '', 2) } `
+  'tests/editor/snap.spec.ts'

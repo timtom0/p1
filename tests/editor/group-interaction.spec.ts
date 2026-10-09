@@ -21,7 +21,15 @@
 
 import type { Page } from '@playwright/test';
 import { mountNestedGroup, mountRotatedGroupOneChild } from './align-fixtures';
-import { clientPointAt, clickAt, drag, expect, settle, test } from './helpers';
+import {
+  clientPointAt,
+  clickAt,
+  drag,
+  dragWithoutSnapping,
+  expect,
+  settle,
+  test,
+} from './helpers';
 import {
   mountGroupedFixture,
   mountGroupFixture,
@@ -242,7 +250,7 @@ test.describe('moving a group', () => {
     });
     const before = await painted(page);
 
-    await drag(page, { x: 100, y: 100 }, { x: 140, y: 160 });
+    await dragWithoutSnapping(page, { x: 100, y: 100 }, { x: 140, y: 160 });
 
     const after = await painted(page);
     // The children moved -- this is a real drag, not a no-op.
@@ -269,7 +277,7 @@ test.describe('moving a group', () => {
     await clickAt(page, 60, 60);
     await clickAt(page, 160, 60, ['Shift']);
     await page.keyboard.press('Control+g');
-    await drag(page, { x: 100, y: 100 }, { x: 140, y: 160 });
+    await dragWithoutSnapping(page, { x: 100, y: 100 }, { x: 140, y: 160 });
     await page.keyboard.press('Control+z');
     expect(await painted(page)).toEqual(before);
   });
@@ -349,7 +357,7 @@ test.describe('moving a child inside a transformed group', () => {
     expect(await outlined(page), 'the leaf is selected, not the group').toEqual([target]);
 
     const before = await paintedBoxes(page);
-    await drag(page, centre, { x: centre.x + 40, y: centre.y });
+    await dragWithoutSnapping(page, centre, { x: centre.x + 40, y: centre.y });
 
     const after = await paintedBoxes(page);
     // The *painted* displacement equals the page-space delta the pointer was asked for.
@@ -386,7 +394,7 @@ test.describe('moving a child inside a transformed group', () => {
     await clickAt(page, centre.x, centre.y);
 
     const before = await paintedBoxes(page);
-    await drag(page, centre, { x: centre.x + 40, y: centre.y });
+    await dragWithoutSnapping(page, centre, { x: centre.x + 40, y: centre.y });
     await page.keyboard.press('Control+z');
 
     expect(await paintedBoxes(page)).toEqual(before);
@@ -403,7 +411,7 @@ test.describe('moving a child inside a transformed group', () => {
     expect(await outlined(page), 'the innermost leaf is selected').toEqual(['leaf']);
 
     const before = await paintedBoxes(page);
-    await drag(page, centre, { x: centre.x + 30, y: centre.y - 20 });
+    await dragWithoutSnapping(page, centre, { x: centre.x + 30, y: centre.y - 20 });
     const after = await paintedBoxes(page);
 
     expect(after['leaf']!.left - before['leaf']!.left).toBeCloseTo(30, 1);

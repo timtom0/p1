@@ -228,6 +228,32 @@ describe('arrangeTargets', () => {
     expect(targets.map((t) => t.id)).toEqual(['a']);
   });
 
+  it('drops a wanted group that has nothing painted in it', () => {
+    // The case `arrange.ts` reaches through its second loop: a wanted group with no *placed* descendants is
+    // still located and emitted, and it is `emit` that declines to give it a box. Giving it a zero box
+    // instead would drag every union and alignment to the origin, so this is a behaviour worth pinning
+    // rather than an incidental branch.
+    const withEmptyGroup = docOf([rect('a', 40, 40, 60, 40), group('hollow', 300, 300, [])]);
+
+    expect(arrangeTargets(withEmptyGroup, ['a', 'hollow']).map((t) => t.id)).toEqual(['a']);
+    // And the consequence: the union is `a`'s box, nowhere near the origin.
+    const bounds = arrangeBounds(arrangeTargets(withEmptyGroup, ['a', 'hollow']))!;
+    expect(bounds.x).toBeCloseTo(40, 6);
+    expect(bounds.y).toBeCloseTo(40, 6);
+
+    // The trigger is "no **placed** descendant", not "nothing visible". `placementsInDocument` does not
+    // filter on `visible`, so a group whose only child is invisible still has a placed descendant and keeps
+    // its box. `boxFor`'s comment ("an empty group, or one whose children are all invisible", arrange.ts
+    // line 177) reads as though invisibility also drops it; measurement says otherwise, and the comment is
+    // left alone because M16 is closed. Asserted here as measured, and flagged rather than reconciled.
+    const invisibleChild = { ...rect('ghost', 10, 10, 40, 40), visible: false };
+    const withInvisibleChild = docOf([rect('a', 40, 40, 60, 40), group('dim', 300, 300, [invisibleChild])]);
+    expect(
+      arrangeTargets(withInvisibleChild, ['a', 'dim']).map((t) => t.id),
+      'invisible is a rendering concern; the child is still placed, so the group still has a box',
+    ).toEqual(['a', 'dim']);
+  });
+
   it('is deterministic: document order, not selection order', () => {
     expect(arrangeTargets(SIZED, ['c', 'a', 'b']).map((t) => t.id)).toEqual(['a', 'b', 'c']);
     expect(arrangeTargets(SIZED, ['b', 'c', 'a']).map((t) => t.id)).toEqual(['a', 'b', 'c']);

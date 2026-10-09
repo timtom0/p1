@@ -28,7 +28,7 @@ import type { Page } from '@playwright/test';
 
 import {
   clickAt,
-  drag,
+  dragWithoutSnapping,
   expect,
   selectionIds,
   settle,
@@ -691,7 +691,9 @@ test.describe('mixed selections', () => {
     await clickAt(page, 70, 60);
 
     const before = await painted(page);
-    await drag(page, { x: 70, y: 60 }, { x: 110, y: 90 });
+    // Snapping is suppressed: this asserts the *movement* after an alignment, and a snap would move the
+    // object somewhere other than the pointer for reasons that have nothing to do with alignment.
+    await dragWithoutSnapping(page, { x: 70, y: 60 }, { x: 110, y: 90 });
     const after = await painted(page);
 
     expect(after['a']!.left - before['a']!.left).toBeCloseTo(40, 0);

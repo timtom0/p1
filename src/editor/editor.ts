@@ -45,6 +45,16 @@ import {
   translatedTransform,
   type ArrangeOperation,
 } from '../model/arrange';
+import {
+  computeSnap,
+  movingBounds,
+  pageSnapRect,
+  snapTargetsFor,
+  snapThresholdDocument,
+  translateBounds,
+  type SnapAxis,
+  type SnapResult,
+} from '../model/snap';
 import { createId } from '../core/ids';
 import { createTransform } from '../model/factory';
 import { localMatrix, paintedBounds } from '../model/transform';
@@ -55,7 +65,7 @@ import { describeCommand } from '../model/commands';
 import type { Command, RestackDirection } from '../model/commands';
 import type { DocStore } from './store/doc-store';
 import type { Viewport } from './viewport/viewport';
-import type { HandleDirection, Overlay, OverlayInput, SelectionOutline } from './viewport/overlay';
+import type { HandleDirection, Overlay, OverlayInput, SelectionOutline, SnapLine } from './viewport/overlay';
 import {
   angleTo,
   HANDLE_UNITS,
@@ -120,6 +130,19 @@ type Gesture =
         string,
         { transform: Transform2D; ancestors: readonly GroupNode[] }
       >;
+      /**
+       * The selection's page-space painted bounds **at pointer-down**, before anything has moved.
+       *
+       * Captured once, deliberately. The snapping calculation needs the arrangement's *unsnapped* box, and
+       * the obvious way to get it -- re-derive it from `this.doc` on every pointer move -- is wrong: this
+       * gesture dispatches its `setTransform` batch each frame, so the document already holds the previous
+       * frame's *snapped* position. Re-deriving from it and translating by the new delta applies the delta
+       * twice, and compounds once a snap has fired. It presents as a drag snapping to a candidate nowhere
+       * near the object on screen, or refusing to snap where it obviously should.
+       *
+       * So the box is read once, here, and every frame is arithmetic on it. See ADR 0017 section 3.
+       */
+      bounds: Rect | null;
     }
   | {
       kind: 'resize';
@@ -216,6 +239,16 @@ export class Editor {
    * be a second place for the overlay's geometry to disagree with the gesture's.
    */
   private marquee: { pageId: string; rect: Rect } | null = null;
+
+  /**
+   * Guides for the snaps currently active in a move gesture.
+   *
+   * **Transient, derived, screen-space state.** Not a command, not a `Document` field, not in history, and
+   * never persisted — it is rebuilt from scratch on every pointer move and cleared by both `pointerUp` and
+   * `cancelGesture`. The `OverlayInput.snapLines` contract has existed since M11 with no consumer;
+   * `snapLines: []` was the placeholder. See ADR 0017 §5.
+   */
+  private snapLines: SnapLine[] = [];
 
   /**
    * An object to drop from the selection if the current press ends without moving.
@@ -882,7 +915,7 @@ export class Editor {
       outlines,
       hover,
       marquee: this.marquee,
-      snapLines: [],
+      snapLines: this.snapLines,
       rotationHandle,
     };
   }
@@ -1126,7 +1159,7 @@ export class Editor {
         break;
       }
       case 'move':
-        this.applyMove(pagePoint, event.shiftKey);
+        this.applyMove(pagePoint, event.shiftKey, event.altKey);
         break;
       case 'resize':
         this.applyResize(pagePoint, event.shiftKey, event.altKey);
@@ -1146,6 +1179,10 @@ export class Editor {
     this.pendingDeselect = null;
     const preview = this.marquee;
     this.marquee = null;
+    // Guides are transient by contract (ADR 0017 §5): they describe the snap that is happening *now*, and a
+    // guide that outlived its gesture would be a lie drawn on the canvas. Cleared here so every gesture
+    // ends with none, whatever kind it was.
+    this.snapLines = [];
 
     try {
       if (gesture.kind === 'marquee' && preview !== null && this.moved) {
@@ -1237,6 +1274,9 @@ export class Editor {
     this.marquee = null;
     this.pendingDeselect = null;
     this.moved = false;
+    // A cancelled drag had guides on screen for as long as it was snapping; they go with it, on the same
+    // terms as a completed drag (ADR 0017 §5).
+    this.snapLines = [];
 
     // Rolls the transaction back rather than dispatching the starting transforms as a
     // compensating edit, which history could not tell apart from a real change.
@@ -1250,7 +1290,10 @@ export class Editor {
     const start = this.captureMovableTransforms();
     if (start.size === 0) return;
     this.store.beginTransaction({ label: `Move ${countLabel(start.size)}`, mergeKey: GESTURE_KEY });
-    this.gesture = { kind: 'move', origin, start };
+    // Read the arrangement's box now, while the document still holds the authored geometry. Every later
+    // frame is arithmetic on this one value; see the `bounds` field's note for why it cannot be re-derived
+    // per frame.
+    this.gesture = { kind: 'move', origin, start, bounds: movingBounds(this.doc, start.keys()) };
   }
 
   private startResize(handle: HandleDirection, nodeId: string): void {
@@ -1293,7 +1336,7 @@ export class Editor {
     return map;
   }
 
-  private applyMove(pagePoint: Vec2, shiftKey: boolean): void {
+  private applyMove(pagePoint: Vec2, shiftKey: boolean, altKey: boolean): void {
     const gesture = this.gesture;
     if (gesture.kind !== 'move') return;
 
@@ -1307,6 +1350,29 @@ export class Editor {
       else dx = 0;
     }
 
+    // Snapping, on top of the raw pointer delta and never instead of it.
+    //
+    // The delta is recomputed from `gesture.origin` on every move, so a snap cannot ratchet or drift: the
+    // input to this frame is the pointer, not the previous frame's result. See ADR 0017 §3.
+    //
+    // Alt suppresses it for the duration of the drag (ADR 0017 §4). Alt is read at pointer-down to choose
+    // *what is grabbed* and during the drag to choose *whether to snap*, so the two never collide.
+    this.snapLines = [];
+    if (!altKey && gesture.bounds !== null) {
+      // The unsnapped box, from the geometry captured at pointer-down. Never from `this.doc`, which this
+      // same method has already mutated by the time the next `pointermove` arrives.
+      const unsnapped = translateBounds(gesture.bounds, { x: dx, y: dy });
+      const snap = this.snapFor(unsnapped, gesture.start);
+      if (snap !== null) {
+        dx += snap.adjustment.x;
+        dy += snap.adjustment.y;
+        this.snapLines = this.guidesFor(
+          snap.axes,
+          translateBounds(gesture.bounds, { x: dx, y: dy }),
+        );
+      }
+    }
+
     const cmds: Command[] = [];
     for (const [id, entry] of gesture.start) {
       cmds.push({
@@ -1315,6 +1381,9 @@ export class Editor {
         // `dx`/`dy` are page-space; the transform is parent-local. The conversion is identity at
         // depth 0, so a top-level object moves exactly as before, and correct one level down, where
         // adding the page delta directly moved the child along its group's local axis instead.
+        //
+        // A snapped delta goes through the *same* conversion as an unsnapped one, so snapping cannot drift
+        // where plain dragging no longer does.
         patch: moveTransform(
           entry.transform,
           pageDeltaToParentDelta(entry.ancestors, { x: dx, y: dy }),
@@ -1324,6 +1393,80 @@ export class Editor {
     this.store.dispatch({ type: 'batch', cmds }, { mergeKey: GESTURE_KEY });
     this.moved = true;
     this.redrawOverlay();
+  }
+
+  /**
+   * The snap for the current unsnapped box, or `null` when there is nothing to snap to.
+   *
+   * Takes the box rather than a delta, and reads the document only for *targets* -- the objects being
+   * snapped to, which the moving selection never includes and which do not move during the gesture. The
+   * moving box itself comes from the gesture's captured geometry; deriving it here would read a document
+   * this method has already changed. See the `bounds` field's note.
+   */
+  private snapFor(
+    moving: Rect,
+    start: ReadonlyMap<string, { transform: Transform2D; ancestors: readonly GroupNode[] }>,
+  ): SnapResult | null {
+    // The first member's page supplies the page-edge candidates.
+    //
+    // A selection can span pages -- shift-click does not stop at a page edge, and `restack` already handles
+    // that by bucketing per page. Snapping does not: which page's edges should a selection straddling two
+    // of them align to has no defensible answer, so the first member's page is used and the behaviour is
+    // stated rather than left to be discovered. Object candidates still come from the whole document, so
+    // object snapping remains correct either way; only the *page* candidates are page-specific, and today
+    // every page is the same size.
+    const pageId = [...start.keys()]
+      .map((id) => pageIdOfNode(this.doc, id))
+      .find((id): id is string => typeof id === 'string');
+    if (pageId === undefined) return null;
+    // The page's own size is a **document** property, so the page-edge candidates come from `this.doc`.
+    // Page geometry is identical on every page in M17 -- there is no per-page size yet -- and using the
+    // document's is the only reading available without inventing one.
+    if (this.doc.pages.find((candidate) => candidate.id === pageId) === undefined) return null;
+
+    return computeSnap({
+      moving,
+      pageId,
+      pageRect: pageSnapRect({ pageSize: this.doc.pageSize }),
+      // Excluding the selection by id is also what prevents self-snapping, and it removes a selected
+      // group's contents too, since a selection never contains both a node and one of its descendants.
+      others: snapTargetsFor(this.doc, start.keys()),
+      // Screen px converted to document px at the *live* zoom, so the snap feels like 10 screen px at every
+      // zoom level rather than 10*zoom document px (ADR 0017 §2).
+      threshold: snapThresholdDocument(this.viewport.zoom),
+    });
+  }
+
+  /**
+   * Guides for the active snaps, in the overlay's existing `SnapLine` shape.
+   *
+   * Derived, screen-space, transient state: not a command, not a document field, not in history. Drawn by
+   * `Overlay.snapLine` through the same page→layer conversion as the outline and the handles.
+   *
+   * Pure: it is handed the arrangement's box and returns lines. It reads no document, which is what keeps a
+   * guide describing *this* frame's snap rather than the last one the document happens to hold.
+   *
+   * The extent of each guide spans the moving arrangement's own box, so a guide reads as "these things are
+   * aligned here" rather than as an arbitrary full-page rule.
+   */
+  private guidesFor(axes: readonly SnapAxis[], rect: Rect): SnapLine[] {
+    return axes.map((axis) =>
+      axis.axis === 'x'
+        ? {
+            axis: 'x' as const,
+            position: axis.position,
+            pageId: axis.pageId,
+            from: rect.y,
+            to: rect.y + rect.height,
+          }
+        : {
+            axis: 'y' as const,
+            position: axis.position,
+            pageId: axis.pageId,
+            from: rect.x,
+            to: rect.x + rect.width,
+          },
+    );
   }
 
   private applyResize(pagePoint: Vec2, shiftKey: boolean, altKey: boolean): void {

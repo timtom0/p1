@@ -36,7 +36,15 @@
  */
 
 import type { Page } from '@playwright/test';
-import { clickAt, drag, expect, frameIsEditing, selectionIds, test } from './helpers';
+import {
+  clickAt,
+  drag,
+  dragWithoutSnapping,
+  expect,
+  frameIsEditing,
+  selectionIds,
+  test,
+} from './helpers';
 import { mountFixture } from '../visual/harness';
 
 /**
@@ -111,7 +119,7 @@ test.describe('pointerdown suppresses the browser native selection', () => {
     expect(await selectionIds(page)).toEqual(['tile']);
 
     // Start and end clear of any text, so this one is only about the gesture surviving.
-    await drag(page, { x: 60, y: 50 }, { x: 220, y: 60 });
+    await dragWithoutSnapping(page, { x: 60, y: 50 }, { x: 220, y: 60 });
 
     // The dragged shape must sit where it was dropped. The documented failure leaves it a fraction of
     // the way there -- `pointercancel` arrives and no further pointermove is delivered.

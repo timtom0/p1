@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-import { clickAt, drag, selectionCount, settle } from './helpers';
+import { clickAt, dragWithoutSnapping, selectionCount, settle } from './helpers';
 import { mountFixture } from '../visual/harness';
 import { GEOMETRY, SHAPES } from './shape-fixtures';
 
@@ -175,7 +175,10 @@ test.describe('the live document never contains a shear', () => {
     const centre = centreOf(ROTATED);
     const DX = 40;
     const DY = 15;
-    await drag(page, centre, { x: centre.x + DX, y: centre.y + DY });
+    // Snapping is suppressed: this asserts that a move adds no shear, and a snapped delta is still a
+    // pure translation -- but the subject here is within the threshold of the page centre, so letting it
+    // snap would test the snap rather than the shear.
+    await dragWithoutSnapping(page, centre, { x: centre.x + DX, y: centre.y + DY });
 
     await expectNoShear(page);
     const after = await matrixFor(page, ROTATED);

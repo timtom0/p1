@@ -193,6 +193,40 @@ export async function endDrag(
 }
 
 /**
+ * Drags with snapping suppressed, by holding Alt **after** the press.
+ *
+ * ## Why the modifier goes down late
+ *
+ * Alt is not free for the whole gesture. At pointer-down it means "select the containing group instead of
+ * the leaf" (`selectableIdFor`), so passing `['Alt']` to {@link drag} would change *what is grabbed* — which
+ * is exactly wrong for a test that grabs a child inside a transformed group and needs that child.
+ *
+ * ADR 0017 §4 resolves this by splitting Alt's two uses in time: it is read at pointer-down to choose what is
+ * grabbed and during the drag to choose whether to snap. Pressing first and holding Alt afterwards is the
+ * interaction the ADR describes ("the user presses to grab the leaf, then holds Alt to drag it freely"), so
+ * this helper is also the honest way to test that the split works.
+ *
+ * ## Why a test would want this
+ *
+ * Snapping is now part of every move gesture (ADR 0017), so a drag that happens to pass within the threshold
+ * of a page edge or another object legitimately lands somewhere other than the pointer. Tests about
+ * *movement* — that a group moves every child, that a nested child follows the page axis, that a rotated
+ * object gains no shear — are not about snapping, and their exact-delta assertions should keep measuring
+ * movement. Suppressing the snap isolates the property under test instead of quietly widening it.
+ */
+export async function dragWithoutSnapping(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  steps = 8,
+): Promise<void> {
+  await beginDrag(page, from);
+  await page.keyboard.down('Alt');
+  await moveDragTo(page, to, steps);
+  await endDrag(page, ['Alt']);
+}
+
+/**
  * Waits for the app to stop changing.
  *
  * The app renders synchronously inside its event handlers, so this is only here to
