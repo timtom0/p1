@@ -447,16 +447,16 @@ One rough edge worth naming rather than hiding: **orphaned image assets are neve
 
 ```bash
 npm test                            # 904 unit tests
-npm run test:visual                 # 611 browser tests, 25 visual baselines
-.\scripts\mutation-check.ps1        # 99 deliberate breakages, each asserted to fail a suite
+npm run test:visual                 # 617 browser tests, 25 visual baselines
+.\scripts\mutation-check.ps1        # 102 deliberate breakages, each asserted to fail a suite
 ```
 
 That last one is unusual and worth explaining. A green suite says nothing on its own unless
-a test *would* have failed, so `mutation-check.ps1` breaks 99 behaviours one at a time — dirty
+a test *would* have failed, so `mutation-check.ps1` breaks 102 behaviours one at a time — dirty
 state, the save baseline, the text fence at save time, asset ordering, version refusals, id
 reservation, the layer-order no-op rule, page-to-local conversion, snapping's threshold and
-tie-break, visibility in arrangement bounds — and asserts the relevant suite turns red. **98
-are detected.** It found real gaps in tests that were otherwise passing, including one
+tie-break, visibility in arrangement bounds, the tool shortcuts — and asserts the relevant suite turns
+red. **101 are detected.** It found real gaps in tests that were otherwise passing, including one
 dirty-state test that passed *without the save having happened*.
 
 It also carries a **documented list of what it cannot cover**, and that list is the point.

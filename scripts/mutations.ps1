@@ -32,7 +32,7 @@
 #
 # A mutation that no test can kill is either a coverage gap or an equivalent mutant, and the two deserve
 # opposite responses: a gap should be closed, an equivalent mutant should be recorded and never counted
-# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 99 undetected"
+# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 102 undetected"
 # is a decision rather than an oversight -- and so that the next milestone inherits a known quantity instead
 # of rediscovering it.
 #
