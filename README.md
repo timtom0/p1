@@ -48,23 +48,35 @@ interaction and persistence; the DOM is a disposable projection of that model.
   **restrict** group scaling to uniform rather than extend the transform to a general affine.
 - [ADR 0011b — the selection frame is the object's frame](docs/adr/0011b-selection-frame-and-stroke.md) —
   fixing the outline so it follows rotation, renaming `selectionRect`, and choosing a stroke-width
-  semantic. The geometry a future group will rely on.
+  semantic. The geometry a later group relies on.
 - [ADR 0012 — the persistent group model](docs/adr/0012-persistent-group-model.md) —
   `GroupNode` with group-local children, nesting, uniform-only group scale, the one
   recursive traversal, paint order by flattening, and `formatVersion: 2` with no
-  migration. **The group as a document object; no interaction built.**
+  migration. **The group as a document object.**
+- [ADR 0013 — group interaction](docs/adr/0013-group-interaction.md) — how a group is
+  entered, selected, moved and left, and why the page→group→child conversion is the
+  load-bearing part.
+- [ADR 0014 — asset garbage collection](docs/adr/0014-asset-garbage-collection.md) —
+  what an asset's identity is, and why nothing collects them yet.
+- [ADR 0016 — alignment and distribution](docs/adr/0016-alignment-and-distribution.md) —
+  painted bounds as the shared quantity, the sort/anchor/spacing rules, and why the
+  aggregate box is transient calculation data.
+- [ADR 0017 — snapping and guides](docs/adr/0017-snapping-and-guides.md) — the 10-screen-pixel
+  threshold and the zoom conversion it needs, how a candidate is chosen, why Alt, and
+  the defect that made a drag snap to a candidate 140px from the object on screen.
 - [Visual tests](tests/visual/README.md) — browser verification of the renderer
   and the viewport.
+
+> ADR numbering skips **0015**, which was never written.
 
 > Every architectural risk taken so far is closed, and each one is recorded with the
 > measurement or the bug that forced it. The remaining known limitations are narrow and
 > documented: an external model write to a frame being edited is deferred rather than
 > applied immediately, native redo does not survive a text session, orphaned image assets
-> are never collected, `{ external }` assets have no resolver, there are no format
-> migrations yet, and there is neither grouping nor multi-object resize — the last two
-> **the same missing capability**, proved algebraically rather than left as intentions.
-> `scaleX`/`scaleY` have no writer, and rotation is reachable only on a single unrotated
-> selection.
+> are never collected, `{ external }` assets have no resolver, and there are no format
+> migrations yet. Multi-object resize is still absent — but **not** because of shear,
+> which is why it is no longer grouped with "grouping is blocked" the way it was in
+> ADR 0010. See [Groups](#groups).
 
 ## Getting started
 
@@ -75,34 +87,43 @@ npm run dev        # http://localhost:5173
 
 | Script | Purpose |
 |---|---|
-| `npm run dev` | Dev server with HMR |
+| `npm run dev` | Dev server with HMR, on **5173** |
 | `npm run build` | Typecheck, then production build to `dist/` |
+| `npm run preview` | Serve `dist/` — on **5174**, which is what the browser suite uses |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run lint` | ESLint, including the module boundary rules |
 | `npm test` | Unit and DOM-level tests (Vitest) |
-| `npm run test:visual` | Browser verification of the renderer (Playwright) |
+| `npm run test:visual` | Browser suite (Playwright) |
 | `npm run test:visual:update` | Re-record visual baselines |
 | `npm run test:all` | Both suites |
+| `.\scripts\mutation-check.ps1` | Deliberate breakages, each asserted to fail a suite |
 
-Visual tests need the browser once: `npx playwright install chromium`.
+Browser tests need the browser once: `npx playwright install chromium`.
 
 No backend, no cloud service, no runtime dependencies.
 
-## Current state: M12 (groups are documents)
+### A note on what the browser suite actually runs
+
+Since M15 the browser suite is served **`dist/`**, not the dev server. That was not a
+preference — it is a diagnosed fix. A dev-mode boot pulls roughly 49 module requests per
+boot against one long-lived server, and on Windows that exhausts the ephemeral port pool
+(`net::ERR_NO_BUFFER_SPACE`, `Tcpip` event 4231), which showed up as an intermittent
+browser failure. One bundled request per boot cannot do that.
+
+The consequence is a deliberate test-infrastructure boundary: **the browser suite tests the
+production bundle**, so a change to `src/` only reaches it after a rebuild. That is why
+`scripts/mutation-check.ps1` rebuilds `dist/` before every browser mutant — without that,
+every source mutant silently reports "NOT FOUND" and the tool stops testing anything while
+still reporting survivors. `spike.html` stays excluded from the bundle and is proxied to
+the dev server.
+
+## Current state: M18
 
 The document is editable, its text is a real document format rather than a record of what
-the browser happened to write, it **survives closing the tab**, several objects can be worked
-on together and reordered in the paint stack — the seams between the model, the renderer, the
-browser, the editor and the file are written down and tested rather than assumed (M9) — **nothing
-the application paints is ever a shear** (M10), the transform model has been examined for a general
-affine and deliberately left alone (M10b), and **the selection frame is now the object's real,
-rotated frame** (M11).
-
-That last one sounds cosmetic. It was not: for nine milestones the editor drew an unrotated box
-around a rotated object, put the resize handles on that box rather than on the object, and hid the
-rotation grip for anything already rotated. Nothing was *broken* — clicking, dragging and undo all
-worked — which is exactly why it survived so long, and why the pixel baselines could not see it
-either.
+the browser happened to write, it **survives closing the tab**, several objects can be
+worked on together, reordered in the paint stack, **grouped, aligned, distributed and
+snapped into alignment** — and the seams between the model, the renderer, the browser, the
+editor and the file are written down and tested rather than assumed.
 
 Every mutation — a drag, an inspector field, an undo — goes through one command funnel,
 which is what makes "every change is undoable" a property of the architecture rather than a
@@ -112,6 +133,9 @@ convention.
   respected; shift-click and shift-drag coexist.
 - **Move, resize, rotate** with shift (constrain) and alt (from centre) semantics.
   Resize under rotation holds the opposite corner exactly.
+- **Snapping** during a move, to page edges and to other objects, with transient guides.
+- **Alignment and distribution** for a multi-selection.
+- **Groups**, nestable, with page-space dragging.
 - **Undo/redo** with gesture coalescing, so one drag is one step.
 - **A screen-space overlay** outside the zoom transform, so selection strokes stay
   1px and handles a constant size at any zoom.
@@ -126,21 +150,42 @@ visual text has exactly one run-sequence. Two documents that render identically 
 the same document, which is what stops the undo stack filling with steps that appear to
 do nothing.
 
+## Keyboard and pointer
+
 | | | |
 |---|---|---|
 | <kbd>click</kbd> / <kbd>drag</kbd> | select, move | |
+| <kbd>alt</kbd>+<kbd>click</kbd> | select through a lock, or select the containing group | |
+| <kbd>alt</kbd>+<kbd>drag</kbd> | move with **snapping suppressed** | |
 | <kbd>shift</kbd>+<kbd>click</kbd>, <kbd>shift</kbd>+<kbd>drag</kbd> | extend selection, constrain to an axis | |
-| <kbd>alt</kbd>+<kbd>click</kbd> | select through a lock | |
 | <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> | nudge (<kbd>shift</kbd> for ten times, <kbd>alt</kbd> to lock the axis) | |
 | <kbd>⌫</kbd> | delete the selection | |
-| <kbd>⏎</kbd> / <kbd>Esc</kbd> | enter / leave a text session, or disarm a tool | |
+| <kbd>⏎</kbd> / <kbd>Esc</kbd> | enter / leave a text session; <kbd>Esc</kbd> cancels a gesture, disarms a tool, leaves a group, then clears the selection | |
+| <kbd>ctrl</kbd>+<kbd>G</kbd> / <kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>G</kbd> | group / ungroup the selection | |
+| <kbd>ctrl</kbd>+<kbd>A</kbd> | select all | |
 | <kbd>ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd> / <kbd>U</kbd> | bold / italic / underline while editing text | |
-| <kbd>ctrl</kbd>+<kbd>Z</kbd> | undo — routed to the text session when one is open | |
+| <kbd>ctrl</kbd>+<kbd>Z</kbd> / <kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>Z</kbd> / <kbd>ctrl</kbd>+<kbd>Y</kbd> | undo / redo — routed to the text session when one is open | |
 | <kbd>ctrl</kbd>+<kbd>S</kbd> | save | |
 | <kbd>]</kbd> / <kbd>[</kbd> | bring forward / send backward | |
 | <kbd>ctrl</kbd>+<kbd>]</kbd> / <kbd>ctrl</kbd>+<kbd>[</kbd> | bring to front / send to back | |
+| <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> / <kbd>1</kbd> | zoom in / out / fit / actual size | |
+| <kbd>space</kbd>+<kbd>drag</kbd> | pan | |
+| <kbd>V</kbd> / <kbd>R</kbd> / <kbd>E</kbd> / <kbd>L</kbd> | select / rectangle / ellipse / line | |
 
-### Graphical objects
+Two of these deserve a note rather than a table cell.
+
+**Bold/italic/underline have no key handler, on purpose.** Inside a text session the browser
+owns the keyboard: <kbd>ctrl</kbd>+<kbd>B</kbd> is Chromium's own contenteditable command and
+arrives as a `beforeinput` the session reads back into the canonical model. Binding it again
+would put a second implementation between the user and the same result.
+
+**<kbd>Esc</kbd> is ordered by consequence, not by convenience.** Cancelling an in-flight
+gesture beats disarming an armed tool, which beats leaving a group, which beats clearing a
+selection — and exactly one of them fires. Leaving a group before clearing the selection
+matters: the reverse leaves you inside a group with nothing selected, which is the most
+confusing of the three outcomes.
+
+## Graphical objects
 
 Rectangles, ellipses and lines, with one geometry contract behind all three:
 
@@ -193,7 +238,7 @@ transform-invariant, so every measured value is already in document px and needs
 conversion — and zooming never invalidates a measurement. Hidden and out-of-date elements
 are *refused* rather than reported as zero.
 
-### Working with several objects
+## Working with several objects
 
 Select more than one: <kbd>shift</kbd>+click adds, <kbd>shift</kbd>+click on something already
 selected removes it, and a drag on empty page space draws a marquee. Move, delete, nudge and
@@ -218,22 +263,80 @@ A **hidden** object cannot be clicked — there is nothing painted to click — 
 reaches it, so the `Visible` checkbox is never a one-way door. A **locked** object is skipped by
 both, and <kbd>alt</kbd>+click is how you get through: locking is a barrier, not a hiding place.
 
-**A selection has no bounding box.** With several rotated objects selected there is
-deliberately no single rectangle drawn around them, because for a 30°-rotated object the painted
-extent is much larger than its box — such a rectangle would match nothing you can see or click.
-Each object keeps its own outline, and the status bar reports how many are selected.
+A **multi-selection draws no single bounding rectangle.** With several rotated objects selected
+there is deliberately no one rectangle drawn around them, because for a 30°-rotated object the
+painted extent is much larger than its box — such a rectangle would match nothing you can see or
+click. Each object keeps its own outline, and the status bar reports how many are selected.
+Alignment and distribution compute such a union, but only as **transient calculation data**: it
+is never drawn, never grabbable, and never stored.
 
-### Why there are no groups
+### Alignment and distribution
 
-**Grouping is not blocked.** M10 investigated it, and M10b removed the blocker — by *restricting*
-group scaling to uniform scale, not by changing the geometry model. What remains is the work of
-building them. See [ADR 0011](adr/0011-affine-transform-decision.md):
+Eight buttons in the toolbar: **Align left / centre / right / top / middle / bottom**, and
+**Distribute H / Distribute V**.
 
-- **A group-local child is fully representable today**, for every case except one: a **non-uniform
-  group scale applied to a rotated child** needs a *shear*, and `R(θ)·S` cannot produce one.
-  Proved as arithmetic, not asserted.
-- **That is the only blocked case**, and it is one capability rather than a coordinate space. Uniform
-  group scale composes exactly, so `page → group → child → local` works for everything else.
+- **Alignment needs two or more objects. Distribution needs three or more**, because with two
+  both are the outermost anchors and there is nothing to place between them.
+- Both operate on **page-space painted bounds** — the same quantity everywhere else in the
+  editor. A rotated object aligns by where it is *seen*, not by its unrotated model frame.
+- Distribution sorts by the near painted edge, breaks ties by **id** so the result cannot depend
+  on click order, fixes the outermost two as anchors, and equalises the **gaps** between painted
+  edges (not the distances between centres). Negative gaps are allowed.
+- A group is aligned and distributed by its **derived** bounds — the union of its descendants' —
+  and is moved **as a group**. Its children are never rewritten individually.
+- An operation that cannot apply is disabled with `aria-disabled`, not `disabled`, so the button
+  stays focusable and a test can still exercise the guard underneath.
+- Clicking an already-aligned selection is a **no-op and not an undo step**, because zero deltas
+  are omitted rather than stored.
+
+### Snapping and guides
+
+While you drag, the moving selection snaps to page edges and page centre, and to the edges and
+centres of other objects — including groups, by their derived bounds. A guide is drawn for as
+long as the snap holds.
+
+- **The threshold is 10 screen pixels at every zoom.** That is the whole reason
+  `snapThresholdDocument` divides by the live zoom: the gesture's delta is already in document
+  px, so comparing it against a screen-space constant would make the effective threshold
+  `10 × zoom` — dead at 25%, magnetic at 400%, and exactly right at 100%, which is the zoom the
+  suite tests by default.
+- **A multi-selection is one arrangement.** It is snapped by its union and moved by one delta, so
+  members cannot end up at different alignments than you dragged toward.
+- **Nearest candidate wins; ties go to the earlier one in a fixed scan order** — page features
+  first, then objects in document order. Page geometry is stable for as long as the document is,
+  whereas an object candidate may be about to move.
+- **Both axes can snap at once**, because a drag toward a corner wants both.
+- **<kbd>alt</kbd> during the drag suppresses snapping.** Alt is the only modifier free at that
+  point in the gesture: at pointer-down it chooses *what is grabbed*, and during the drag it
+  chooses *whether to snap*, so the two never apply at the same moment.
+- **Guides are derived state.** They are rebuilt from scratch each frame and cleared when the
+  gesture ends *or is cancelled*. They are not commands, not document fields, and never
+  persisted — snapping writes nothing but a `setTransform`, the same mutation an unsnapped drag
+  performs.
+
+This is the one place worth reading the ADR rather than the summary, because of a real defect it
+records. The obvious implementation re-derives the moving box from the document on every frame —
+and that is wrong, because the move gesture dispatches its transform *every frame*, so the
+document already holds the previous frame's snapped position. The delta gets applied twice and
+compounds. It presented as a drag snapping to a candidate **140px from the object on screen**,
+and as <kbd>alt</kbd> appearing not to suppress snapping when it did. The fix is that the
+gesture captures its geometry once, at pointer-down, and every frame is arithmetic on that.
+
+## Groups
+
+Groups exist, are documents, and nest. <kbd>ctrl</kbd>+<kbd>G</kbd> groups the selection and
+<kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>G</kbd> ungroups it; there is no toolbar button, because
+there is no menu and a chord sits more cheaply than one.
+
+- A group is a real node with group-local children, saved in the document and part of
+  `formatVersion: 2`.
+- <kbd>alt</kbd>+click selects the containing group rather than the leaf you clicked.
+- <kbd>Esc</kbd> leaves a group before it clears the selection.
+- **Dragging a child inside a rotated or scaled group follows the page axis, not the group's.**
+  The page-space delta is converted into the parent-local one the child's transform understands.
+  Getting this wrong was the M16 defect: the child drifted along the group's local axis, which is
+  invisible at depth 0 and is exactly why the browser test for it is nested.
+- Group scale is **uniform only**, and that restriction is deliberate — see below.
 
 ### Why the transform model was *not* extended to a general affine
 
@@ -258,7 +361,12 @@ interesting parts of that answer:
 So the model stays `R·S`, groups get **uniform-only** scaling, and the re-entry conditions — of which
 the stroke is the binding one — are written down rather than left to judgement.
 
-### Saving and opening
+Multi-object resize is still absent, and no longer shares a cause with grouping: ADR 0010 proved
+that grouping and multi-object resize are *one* capability, because both are blocked by the same
+non-uniform-scale-plus-rotation shear. Grouping was then built with uniform scale, so the shear is
+no longer on the path — a multi-object resize is now its own piece of work, not a blocked one.
+
+## Saving and opening
 
 **Save** downloads a `.p1doc`. **Open** reads one. The first workflow is the whole point:
 
@@ -297,39 +405,73 @@ Loading **never waits for an image to decode**: a document with a broken image o
 instantly behind a marked placeholder, so loading can only fail because the document is
 malformed, never because a picture would not paint.
 
-### Deliberately not implemented yet
+## What is not painted is not geometry
 
-Snapping, guides, alignment, distribution, and panels beyond the inspector. Grouping and
-multi-object resize, for the reasons above. Autosave, crash recovery, File System
-Access save-in-place, project folders, and format migrations — see
+`visible: false` is not a rendering detail, and M18 established that in the geometry layer.
+
+The renderer propagates `visible: false` down a hidden group's subtree; hit testing refuses a
+node whose own `visible` is false *or* any ancestor's; and ADR 0012 A10 records the rule
+deliberately — a group is the only thing that can hide a subtree, so leaving it inert "would
+make `visible` mean something different on a group than on every other node".
+
+Arrangement is now the fourth reader and agrees with all three. Before that it applied no
+visibility rule at all, which cost five distinct things — an invisible leaf could be named as an
+alignment target, a group whose children were all invisible kept a box, a **hidden group with
+visible children** offered a box for a region where nothing is painted, and because a group's box
+is the union of its descendants', **one invisible member at (5000, 5000) stretched a 60×40 union
+to 5010×5010**. For snapping it was worse than cosmetic, because a snap *draws a guide*: dragging
+near an invisible object snapped to it and drew a line pointing at nothing.
+
+`placementsInDocument` still applies no visibility rule, and should not: a placement says *where*
+a thing is, which does not require it to be on the page. The filter belongs to the code that is
+about what the page shows.
+
+## Deliberately not implemented yet
+
+Panels beyond the inspector — no layer panel, no rulers with draggable guides, no asset library.
+Multi-object resize, for the reason above. Autosave, crash recovery, File System Access
+save-in-place, project folders, and format migrations — see
 [ADR 0007](docs/adr/0007-persistent-document-format.md). On the text side, vertical
 alignment, padding, columns, auto-size, inline colour/size, headings and lists are all
 deferred, each with its reason in
-[ADR 0003](docs/adr/0003-production-text-model.md). On the graphics side, polygons and
+[ADR 0003](docs/adr/0003-production-text-model.md). On the graphics side: polygons and
 paths, stroke alignments other than `inside`, gradients, patterns and shadows — see
 [ADR 0005](docs/adr/0005-shape-geometry-contract.md). On the image side: no crop, no
-`object-position`, no non-rectangular frames, no external asset resolution, and no asset
-library — see [ADR 0006](docs/adr/0006-image-asset-contract.md).
+`object-position`, no non-rectangular frames, no external asset resolution — see
+[ADR 0006](docs/adr/0006-image-asset-contract.md).
 
-### Verifying it
+One rough edge worth naming rather than hiding: **orphaned image assets are never collected**
+([ADR 0014](docs/adr/0014-asset-garbage-collection.md)).
+
+## Verifying it
 
 ```bash
-npm test                # 591 unit tests
-npm run test:visual     # 468 browser tests, 25 visual baselines
-& scripts\mutation-check.ps1   # 30 deliberate breakages, each asserted to fail a suite
+npm test                            # 904 unit tests
+npm run test:visual                 # 611 browser tests, 25 visual baselines
+.\scripts\mutation-check.ps1        # 99 deliberate breakages, each asserted to fail a suite
 ```
 
 That last one is unusual and worth explaining. A green suite says nothing on its own unless
-a test *would* have failed, so `mutation-check.ps1` breaks twenty-six behaviours one at a time —
-dirty state, the save baseline, the text fence at save time, asset ordering, version
-refusals, id reservation, the layer-order no-op rule — and asserts the relevant suite turns
-red. It found three gaps in tests that were passing, including one dirty-state test that
-passed *without the save having happened*.
+a test *would* have failed, so `mutation-check.ps1` breaks 99 behaviours one at a time — dirty
+state, the save baseline, the text fence at save time, asset ordering, version refusals, id
+reservation, the layer-order no-op rule, page-to-local conversion, snapping's threshold and
+tie-break, visibility in arrangement bounds — and asserts the relevant suite turns red. **98
+are detected.** It found real gaps in tests that were otherwise passing, including one
+dirty-state test that passed *without the save having happened*.
 
-It also carries a **documented list of what it cannot cover**, and that list is the point. The
-`pointercancel` handler is not mutation-checked: with the cause removed no cancel occurs, so
-deleting the listener is unobservable from any test. A mutation that only proves the mutation
-works is worse than a written-down gap.
+It also carries a **documented list of what it cannot cover**, and that list is the point.
+
+- One mutant is an **accepted survivor**: adding padding to the dirty indicator resizes a badge
+  by two pixels, and no test measures that element's geometry. The only way to detect it is a
+  pixel baseline, and ADR 0011b §8 established that these baselines cannot see a sub-pixel chrome
+  change — so a baseline would report it detected while being unable to fail for the right
+  reason. It is written down in `scripts/mutations.ps1` with that justification.
+- Mutations that proved **equivalent** are recorded with the algebra and *not* carried, rather
+  than counted forever as survivors. Reversing an ancestor chain is one: with uniform scale
+  throughout, `R(a)·S(s) · R(b)·S(t) = s·t·R(a+b)`.
+- The `pointercancel` handler is not mutation-checked: with the cause removed no cancel occurs,
+  so deleting the listener is unobservable from any test. A mutation that only proves the
+  mutation works is worse than a written-down gap.
 
 It is also how a real bug stayed invisible for a milestone. <kbd>shift</kbd>-clicking a second
 object and then dragging used to move the pair by 7.5px of an intended 60px and leave the
@@ -338,25 +480,21 @@ back — and the existing test asserted only that the inspector went *mixed*, wh
 satisfies. The M8 test asserts the whole delta, and a mutation of the fix is what keeps it
 fixed.
 
-See the [M0](docs/ARCHITECTURE.md#m0-implementation-notes),
+The implementation notes behind all of this are in
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) — the
+[M0](docs/ARCHITECTURE.md#m0-implementation-notes),
 [M1](docs/ARCHITECTURE.md#m1-implementation-notes),
 [M2](docs/ARCHITECTURE.md#m2-implementation-notes),
 [M3](docs/ARCHITECTURE.md#m3-implementation-notes--production-text-frames-and-typography),
 [measurement boundary](docs/ARCHITECTURE.md#measurement-boundary-implementation-notes),
-[M5](docs/ARCHITECTURE.md#m5-implementation-notes--graphical-objects),
-[M6](docs/ARCHITECTURE.md#m6-implementation-notes--images),
+[M5](docs/ARCHITECTURE.md#m5-implementation-notes---graphical-objects),
+[M6](docs/ARCHITECTURE.md#m6-implementation-notes---images),
 [M7](docs/ARCHITECTURE.md#m7-implementation-notes--persistence),
 [M8](docs/ARCHITECTURE.md#m8-implementation-notes--multi-object-editing) and
-[M9](docs/ARCHITECTURE.md#m9-implementation-notes--interaction-integrity) notes, plus
-[ADR 0001](docs/adr/0001-text-editing-fence.md),
-[ADR 0002](docs/adr/0002-text-undo-composition.md),
-[ADR 0003](docs/adr/0003-production-text-model.md),
-[ADR 0004](docs/adr/0004-measurement-boundary.md),
-[ADR 0005](docs/adr/0005-shape-geometry-contract.md),
-[ADR 0006](docs/adr/0006-image-asset-contract.md) and
-[ADR 0007](docs/adr/0007-persistent-document-format.md) and
-[ADR 0008](docs/adr/0008-multi-selection-and-grouping.md) and
-[ADR 0009](docs/adr/0009-boundaries-audit.md) and
-[ADR 0010](docs/adr/0010-groups-and-the-transform-question.md) and
-[ADR 0011](docs/adr/0011-affine-transform-decision.md) and
-[ADR 0011b](docs/adr/0011b-selection-frame-and-stroke.md).
+[M9](docs/ARCHITECTURE.md#m9-implementation-notes--interaction-integrity),
+[M10](docs/ARCHITECTURE.md#m10-implementation-notes--groups-and-the-transform-question),
+[M10b](docs/ARCHITECTURE.md#m10b-implementation-notes--does-the-geometry-model-need-affine-transforms),
+[M11](docs/ARCHITECTURE.md#m11-implementation-notes--the-geometry-groups-will-stand-on),
+[M12](docs/ARCHITECTURE.md#m12-implementation-notes--the-group-model) notes — plus every ADR
+above, each of which records the measurement or the bug that forced the decision rather than
+the decision alone.

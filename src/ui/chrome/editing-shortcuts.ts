@@ -18,6 +18,7 @@
  */
 
 import type { Editor } from '../../editor/editor';
+import type { ShapeKind } from '../../model/types';
 
 export interface EditingShortcutOptions {
   editor: Editor;
@@ -120,6 +121,23 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
       return;
     }
 
+    // ---- tools -------------------------------------------------------------
+    // The four tool buttons have always advertised these keys in their `title`, and nothing bound
+    // them -- the titles were a promise the app did not keep. Binding them here rather than in
+    // `shortcuts.ts` is what makes the behaviour correct: this is the half that knows about text
+    // sessions, and the early return above means a keypress cannot arm a tool while text is being
+    // edited. `shortcuts.ts` has no such guard, so putting it there would let "r" swap the tool out
+    // from under an open text session.
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      const tool = TOOL_KEYS[event.key.toLowerCase()];
+      if (tool !== undefined) {
+        event.preventDefault();
+        if (tool === 'select') editor.disarmDrawTool();
+        else editor.armDrawTool(tool);
+        return;
+      }
+    }
+
     // ---- deletion ---------------------------------------------------------
     if (event.key === 'Delete' || event.key === 'Backspace') {
       const ids = [...editor.selectionState.ids];
@@ -148,6 +166,23 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
 
 /** Shift-nudges ten times further, matching every other editor. */
 const NUDGE_MULTIPLIER = 10;
+
+/**
+ * The tool each plain letter arms, matching the toolbar buttons' `title` attributes.
+ *
+ * `select` is spelled as the *absence* of a draw tool rather than a kind, because
+ * `disarmDrawTool` is what the Select button calls and the two must not diverge.
+ *
+ * Matched on `key.toLowerCase()`, so the bindings survive a non-QWERTY layout: `event.code` would
+ * put them on the wrong physical keys, which is the same reason the layer-order ladder above uses
+ * `key` rather than `code`.
+ */
+const TOOL_KEYS: Readonly<Record<string, ShapeKind | 'select'>> = {
+  v: 'select',
+  r: 'rect',
+  e: 'ellipse',
+  l: 'line',
+};
 
 function arrowDelta(key: string, step: number): { x: number; y: number } | null {
   switch (key) {

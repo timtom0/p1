@@ -727,3 +727,28 @@ Add-Mutation 'arrangement targets are resolved without filtering on visibility a
 # The failure it prevents is not the dropped box -- `isGroup: true` already gives that -- but the *wrong*
 # box: restoring `location.node.type === 'group'` would hand `emit` the authored parent-local transform where
 # `leafWorld` expects a page-space one.
+# --- Tool keyboard shortcuts -----------------------------------------------------------------
+#
+# The four tool buttons carried `title` attributes promising V/R/E/L for their whole life and nothing
+# bound them. No suite could see it, because the defect is the *absence* of behaviour -- no test pressed
+# a key and expected a tool to change, because the interface was documented in a tooltip and implemented
+# nowhere. This block exists so that cannot recur silently.
+#
+# The text-session test is the one that earns its keep: putting these bindings in `shortcuts.ts` instead
+# of `editing-shortcuts.ts` would make them fire during an open text session, because only the latter
+# returns early for one.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'the tool shortcuts are not bound (the original defect: titles promising keys nothing handles)' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace('      const tool = TOOL_KEYS[event.key.toLowerCase()];', '      const tool = TOOL_KEYS[''__never__'' + event.key.toLowerCase()];') } `
+  'tests/editor/tool-shortcuts.spec.ts'
+
+Add-Mutation 'a tool shortcut fires while a text session is open, swapping the tool mid-edit' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("    if (editor.currentMode === 'textEdit') {", "    if (editor.currentMode === 'textEdit' && false) {") } `
+  'tests/editor/tool-shortcuts.spec.ts'
+Add-Mutation 'V arms a draw tool instead of returning to select' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("  v: 'select',", "  v: 'rect',") } `
+  'tests/editor/tool-shortcuts.spec.ts'
