@@ -33,11 +33,19 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M10b** Affine decision | **Done — RESTRICT GROUPS** — see [M10b notes](#m10b-implementation-notes--does-the-geometry-model-need-affine-transforms) and [ADR 0011](adr/0011-affine-transform-decision.md). The 28-site inventory; the candidate model defined and proved; rotation survives under shear; resize, hit testing, measurement and rendering are already correct for any invertible matrix; and the extension is refused because it buys one capability nothing can produce while forcing a stroke decision with no cheap answer. Two pre-existing bugs found (the selection frame does not follow rotation; the stroke semantic was never chosen). |
 | **M11** Selection geometry | **Done** — see [M11 notes](#m11-implementation-notes--the-geometry-groups-will-stand-on) and [ADR 0011b](adr/0011b-selection-frame-and-stroke.md). F6 fixed: the selection outline, its eight handles and its rotation grip are now the object's *transformed* frame, reusing the renderer's own projection rather than adding a second one. `selectionRect` renamed `modelFrameUnion`; `paintedBounds` and `transformedCorners` added so "where is this object" is a named quantity. F7/F8 resolved: stroke width is a local dimension and transforms with the object. The accidental rotate-handle suppression is gone. |
 | **M12** Group model | **Done — the document object, no interaction** — see [M12 notes](#m12-implementation-notes--the-group-model) and [ADR 0012](adr/0012-persistent-group-model.md). `GroupNode` with group-local children, nesting to arbitrary depth, uniform-only group scale, `tree.ts` as the single recursive traversal, paint order by flattening. Persistence at `formatVersion: 2`, with version 1 still read and no migration. |
-| **M13** | Group interaction | **Done** - see [ADR 0013](adr/0013-group-interaction.md). `group`/`ungroup` through the command funnel; grouping as a pure structural array move on M12's theorem; contiguous-span grouping; child object identity preserved; moved-group ungroup composition; group scope with entry and exit; the ancestor/descendant selection invariant enforced in `setSelection`. The M12 group fixture was overwritten and recovered from the session store. |
-| **M14** | Asset garbage collection | **Done** - see [ADR 0014](adr/0014-asset-garbage-collection.md). Closes the named gap from ADR 0006 §5. |
-| M15+ | Not started |
+| **M13** Group interaction | **Done** — see [M13 notes](#m13-implementation-notes--group-interaction) and [ADR 0013](adr/0013-group-interaction.md). `group`/`ungroup` through the command funnel; grouping as a pure structural array move on M12's theorem; contiguous-span grouping; child object identity preserved; moved-group ungroup composition; group scope with entry and exit; the ancestor/descendant selection invariant enforced in `setSelection`. The M12 group fixture was overwritten and recovered from the session store. |
+| **M14** Asset garbage collection | **Done** — see [ADR 0014](adr/0014-asset-garbage-collection.md). `pruneAssets` as a payload-free command, so one collection is one undo entry; `referencedAssetIds` as a pure function; reachability via `placementsInDocument` so GC sees exactly what the editor can see. Closes the named gap from ADR 0006 §5. |
+| **M15** Boot reliability | **Done — a harness fix, not a feature** — see [M15 notes](#m15-implementation-notes--boot-reliability). Roughly one test per full run died on a boot that produced no `[data-page]`. Root cause was Windows TCP ephemeral-port exhaustion (`ERR_NO_BUFFER_SPACE`, Tcpip 4231) from a dev-mode module graph, not an application fault. |
+| **M16** Alignment & distribution | **Done** — see [M16 notes](#m16-implementation-notes--alignment-and-distribution) and [ADR 0016](adr/0016-alignment-and-distribution.md). Relative model commands, so undo, history and persistence come from the existing funnel. |
+| **M17** Snapping & guides | **Done** — see [M17 notes](#m17-implementation-notes--snapping-and-guides) and [ADR 0017](adr/0017-snapping-and-guides.md). A pure snapping engine, a 10-screen-pixel threshold, page features scanned first, Alt as an explicit opt-out, transient guides. F21: the moving box is captured at pointer-down. |
+| **M18** Visibility semantics | **Done** — see [M18 notes](#m18-implementation-notes--visibility-semantics). `visible: false` is not a rendering detail: a node is effectively visible when it **and every ancestor** is visible. The contract already lived in the renderer and in `selection.ts`; `arrange.ts` was the outlier and now filters placements. |
+| **M19** Print profile & PDF export | **Done** — see [M19 notes](#m19-implementation-notes--print-profile-and-pdf-export) and [ADR 0018](adr/0018-print-profile-and-pdf-export.md). Export is `window.print()` against a print profile — no PDF writer and no second representation of the document. |
+| M20+ | Not started |
 
-Seven known limitations are recorded rather than hidden. None blocks the next milestone:
+Seventeen known limitations are recorded rather than hidden. Three of them are now closed and struck
+through rather than deleted — the selection outline in M11, group interaction in M13, orphaned assets in
+M14 — so a reader can see what was believed and when it stopped being true. None of the open fourteen
+blocks the next milestone:
 
 - **Lost external writes.** A model write to a frame being edited is deferred and
   replayed on session exit (see ADR 0001 finding 2). M3 widened the hook from text to
@@ -45,9 +53,12 @@ Seven known limitations are recorded rather than hidden. None blocks the next mi
   revisiting before any multi-writer story exists.
 - **Redo does not survive a text session.** Native browser behaviour, accepted
   deliberately in ADR 0002.
-- **Orphaned assets are never collected.** Deleting an image leaves its bytes in the
-  document, because assets are part of the model and therefore part of history (ADR 0006
-  §5's named gap).
+- ~~**Orphaned assets are never collected.**~~ **Closed in M14** by
+  [ADR 0014](adr/0014-asset-garbage-collection.md). `pruneAssets` removes every asset no image node at any
+  depth references, as one command so one collection is one undo entry, and returns the same document
+  reference when there is nothing to collect. It is **never implicit** — nothing on load, save or delete
+  calls it, so the user decides when bytes are dropped, and it has **no menu or toolbar item yet**: it is
+  reachable as the editor action *"Clean up unused images"* (`src/editor/editor.ts`) and nothing else.
 - **`{ external }` assets are typed but not implemented.** They resolve to a named error
   and paint a placeholder rather than silently doing nothing. The reference now round-trips
   through a saved file exactly (ADR 0007 §4), so a project folder is a resolver away — but
@@ -64,22 +75,26 @@ Seven known limitations are recorded rather than hidden. None blocks the next mi
 - **No save-in-place.** Save is a download, so updating a file means downloading again and
   the browser may rename the copy (ADR 0007 §10). Accepted for now because the alternative
   needs a document handle that survives a reload, which needs persisted session state.
-- **No grouping *interaction*.** M12 delivered the group as a **document object** - `GroupNode`,
-  group-local children, nesting, uniform-only group scale, `formatVersion: 2` - and it saves, loads,
-  compares, renders, transforms, hit-tests and edits text correctly (ADR 0012). What does not exist
-  is any way for a person to *make* one: no group/ungroup gesture, no selecting a group, no entering
-  a group, no group dragging, no group transform handles, no aggregate group bounds, no layer panel,
-  no alignment, no snapping. A grouped child is click-selectable, because a rendered object that
-  cannot be hit would be a broken document - that is a consequence of hit testing being correct, not
-  a group feature.
+- ~~**No grouping *interaction*.**~~ **Mostly closed by M13** — see
+  [ADR 0013](adr/0013-group-interaction.md). `group`/`ungroup` gestures, selecting a group, entering and
+  leaving a group, and group dragging all exist now. Still missing from M13's original scope:
+  **group resize** and **scale handles on a group**, both excluded by ADR 0013 as genuinely out of
+  scope — resizing a group means scaling its children, which *is* multi-object resize and needs ADR
+  0011's re-entry condition, and a group's scale must stay uniform — and **no layer panel**. A grouped
+  child remains click-selectable, because a rendered object that cannot be hit would be a broken
+  document — a consequence of hit testing being correct, not a group feature.
 - **A group's scale must be uniform.** Sharper than "groups scale uniformly": a **non-uniform scale
   may not be followed by a rotation**. Nothing is inside a leaf, so a leaf may be scaled
   non-uniformly; a group's children carry their own rotations, so a group's may not. A non-uniform
   group scale is refused at load with a message naming the shear (ADR 0012 §2.1).
 
-- **No aggregate selection frame.** M8's decision, kept in M11 and M12. The visible consequence is
-  that the rotation grip is offered for one object and withheld for several, because there is no
-  single pivot to rotate about.
+- **No aggregate selection frame.** M8's decision, kept through M12 to M19, and the same missing frame is
+  why a group cannot be resized (ADR 0013). The visible consequence is that the rotation grip is offered
+  for one object and withheld for several, because there is no single pivot to rotate about.
+  M16 is the instructive near-miss: alignment and distribution **do** need a box for the whole selection,
+  and `arrangeBounds` computes one as the union of the members' painted boxes. ADR 0010 refused an
+  aggregate selection frame as a rectangle *presented to the user* as though it were a real object, and
+  that is still the rule — the union is computed for the arithmetic and never drawn.
 - **Nothing in the application writes `scaleX`/`scaleY`.** This is the *one* capability the shear
   discussion was about: no gesture, no inspector field, no command sets a scale (ADR 0010 §6 F1).
   A document can *hold* a non-uniformly scaled leaf — `Transform2D` always could, and M12 confirms it
@@ -825,28 +840,39 @@ The subtle part is resize under rotation, so it is specified precisely:
 
 ### 3.6 Guides, grid, snapping
 
-Three separate mechanisms, deliberately not conflated:
+Three separate mechanisms, deliberately not conflated. **Only the third is built**, and the first two are
+listed so the intent is not lost rather than because they exist:
 
-* **Persisted guides** (`page.guides`): user-placed lines, stored in the file,
-  rendered always, draggable, with magnetic snapping.
-* **Grid** (`page.grid`): origin, spacing, subdivisions; render as an overlay
-  pattern; optionally *snap to grid* as a lower-priority snap source.
-* **Smart guides**: transient, computed per gesture.
+* **Persisted guides** (`page.guides`): user-placed lines, stored in the file, rendered always, draggable,
+  with magnetic snapping. **Not built — `Page` has no `guides` field.**
+* **Grid** (`page.grid`): origin, spacing, subdivisions; rendered as an overlay pattern; optionally
+  *snap to grid* as a lower-priority snap source. **Not built — `Page` has no `grid` field.**
+* **Smart guides**: transient, computed per gesture. **Built in M17** ([ADR 0017](adr/0017-snapping-and-guides.md)).
 
-`SnapEngine.snap(pointer, context) → { dx, dy, lines: SnapLine[] }`:
+The engine is a pure module, `src/model/snap.ts`, and knows nothing about the viewport, the overlay or the
+pointer — which is what makes it testable at several zooms without a browser.
 
-1. Build candidate axes: page edges/centre/margins/columns + the transformed
-   bounds of nearby siblings (their 4 edges + 2 centres) + active guides.
+```ts
+computeSnap(input: SnapInput): SnapResult   // { dx, dy, lines: SnapLine[] }
+```
+
+1. Build candidate axes from the page (`pageSnapRect`: edges and centre) and from other objects'
+   **painted** bounds (`snapTargetsFor`, which reuses the M16 arrangement targets and therefore honours
+   M18's visibility rule for free).
 2. Project the moving selection's bounds onto those axes.
-3. Choose the smallest correction within a **6 screen-px** threshold
-   (converted to document units by dividing by zoom, so the feel is zoom-independent).
-4. Prefer, in order: persisted guides → sibling alignment → page/column
-   alignment → equal-spacing → grid.
-5. Return the correction **plus** the line extents so the overlay can draw a
-   full-width/full-height rule (not just a dot).
+3. Choose the smallest correction within **`SNAP_THRESHOLD_SCREEN_PX = 10`** *screen* pixels, converted to
+   document units by `snapThresholdDocument(zoom) = 10 / zoom`, so the feel is zoom-independent.
+4. Page features are scanned **first**, so a tie goes to stable geometry rather than to whichever object
+   happened to be iterated last.
+5. Return the correction **plus** the line extents, so the overlay can draw a full-width/full-height rule
+   rather than a dot. `SnapLine` and `OverlayInput.snapLines` have existed since M11 as placeholders; M17
+   populated them.
 
-Equal-distribution detection is a later refinement; the architecture reserves a
-`kind: 'spacing'` variant on `SnapLine` from the start.
+**Alt** suppresses snapping. The two moments are split in time deliberately: at pointer-down Alt means
+*select the containing group*, during the drag it means *do not snap*.
+
+Guides are **derived, transient, screen-space state**: never persisted, and cleared in both `pointerUp` and
+`cancelGesture`. Equal-spacing detection remains a later refinement.
 
 ### 3.7 Viewport
 
@@ -1499,77 +1525,82 @@ geometry to disagree with the gesture's.
 p1/
 ├─ docs/
 │  ├─ ARCHITECTURE.md            # this document
-│  ├─ adr/                       # one file per expensive-to-reverse decision
-│  └─ guides/                    # contributing, testing, adding-an-object-type
-├─ fixtures/                     # golden .p1doc files per format version
+│  └─ adr/                       # one file per expensive-to-reverse decision (0001-0018; 0015 skipped)
+├─ assets/                       # icon.svg, checked in and referenced from index.html
+├─ scripts/                      # mutation-check.ps1 + mutations.ps1 (the corpus), golden-asset generator
+├─ src/
+│  ├─ core/                      # NO app imports. Pure, dependency-free.
+│  │  ├─ geom/                   # affine.ts, linear-part.ts, mat2d.ts, rect.ts
+│  │  ├─ units/                  # units.ts — unit parsing/formatting/conversion
+│  │  └─ ids.ts                  # id generation + validation
+│  ├─ model/                     # imports core only. ZERO DOM references.
+│  │  ├─ types.ts                # Document, Page, BaseNode, all node types
+│  │  ├─ tree.ts                 # the single recursive traversal (placementOf, nodeById, placementsInDocument)
+│  │  ├─ commands.ts             # Command union + pure apply() + isNoop + describeCommand
+│  │  ├─ shapes.ts               # the shape-kind registry: hit test + inspector props
+│  │  ├─ creation.ts             # creation geometry; the only place defaults are decided
+│  │  ├─ assets.ts               # asset rules, the four load states, referencedAssetIds/orphanAssetIds
+│  │  ├─ arrange.ts              # alignment + distribution (M16); arrangement targets honour visibility
+│  │  ├─ snap.ts                 # the pure snapping engine (M17): candidates, threshold, translateBounds
+│  │  ├─ transform.ts            # Transform2D and the shear predicate
+│  │  ├─ document-equality.ts    # canonical equality, used by dirty state
+│  │  ├─ page.ts                 # page geometry, pageExtentPx — shared by the viewport and print
+│  │  ├─ factory.ts, invariants.ts, rich-text.ts
+│  ├─ render/                    # imports model, core. Owns ALL DOM for documents.
+│  │  ├─ reconciler.ts           # keyed children diff, style patch cache
+│  │  ├─ document-view.ts        # node -> DOM projection; propagates visible:false down a hidden group
+│  │  ├─ dom-style.ts, paint.ts, num.ts, measure.ts, render-context.ts
+│  │  ├─ assets.ts               # id -> src resolution; decode-on-import
+│  │  ├─ rich-text-html.ts       # RichText -> HTML for the production text model
+│  │  ├─ layers/page.ts
+│  │  └─ types/                  # object-type renderers: shape, image, text-frame
+│  ├─ editor/                    # imports model, render, core
+│  │  ├─ editor.ts               # the gesture/command controller — the largest file, deliberately
+│  │  ├─ selection.ts            # hit testing, isEffectivelyVisible, modelFrameUnion, paintedBounds
+│  │  ├─ transform.ts            # resize/rotate maths (and the unused scaleTransforms landmine)
+│  │  ├─ history.ts              # transactions, coalescing, undo/redo
+│  │  ├─ measure.ts
+│  │  ├─ store/doc-store.ts      # the command funnel boundary
+│  │  ├─ viewport/               # viewport.ts, overlay.ts (screen-space overlay), clamp.ts
+│  │  └─ text-edit/              # text-edit-session.ts, text-session-controller.ts — the fenced zone
+│  ├─ ui/                        # imports editor, model, core, persist. No render/ internals.
+│  │  ├─ app.ts                  # composition root — the one deliberate ui/ -> render/ edge
+│  │  ├─ inspector.ts            # schema-driven field rendering
+│  │  ├─ persistence.ts          # file gateway + saved-baseline/dirty-state rules
+│  │  ├─ print-profile.ts        # the @page rule and window.print() (M19)
+│  │  ├─ boot-diagnostics.ts
+│  │  └─ chrome/                 # editing-shortcuts.ts, shortcuts.ts, ruler.ts (+ styles.css)
+│  ├─ persist/                   # imports model, core. A leaf: no DOM, no editor, no ui.
+│  │  ├─ format.ts               # the vocabulary: constants, key lists, validation
+│  │  ├─ serialize.ts            # document -> canonical persisted value
+│  │  └─ deserialize.ts          # persisted value -> document, or a refusal naming a path
+│  └─ spike/                     # throwaway text-editing research (ADR 0001); excluded from the bundle
 ├─ tests/
-│  ├─ unit/                      # geometry, model, commands, units, migrations
-│  ├─ visual/                    # Playwright screenshot diffs of rendered pages
-│  └─ e2e/                       # scripted editing sessions
-├─ benchmarks/                   # reconcile + render throughput
-└─ src/
-   ├─ core/                      # NO app imports. Pure, dependency-free.
-   │  ├─ units/                  # unit parsing/formatting/conversion
-   │  ├─ geom/                   # Vec2, Rect, Mat2D, polygon, bezier bounds
-   │  ├─ ids.ts                  # id generation + validation
-   │  ├─ immutable.ts            # structural-sharing helpers
-   │  ├─ registry.ts
-   │  ├─ events.ts               # tiny typed emitter
-   │  └─ result.ts
-   ├─ model/                     # imports core only. ZERO DOM references.
-   │  ├─ types.ts                # Document, Page, BaseNode, all node types
-   │  ├─ shapes.ts               # the shape-kind registry: hit test + inspector props
-   │  ├─ creation.ts             # creation geometry; the only place defaults are decided
-   │  ├─ assets.ts               # asset rules; the four load states; fit labels
-   │  ├─ schema.ts               # validation schema language
-   │  ├─ factory.ts              # createNode, defaults, cloning
-   │  ├─ selectors.ts            # memoized derived reads (walk, bounds, ancestors)
-   │  ├─ invariants.ts
-   │  ├─ commands.ts             # Command union + pure apply()
-   │  └─ text/                   # RichText model + HTML normalization
-   ├─ render/                    # imports model, core. Owns ALL DOM for documents.
-   │  ├─ reconciler.ts           # keyed children diff, style patch cache
-   │  ├─ assets.ts               # id -> src resolution; decode-on-import
-   │  ├─ dom-pool.ts             # element recycling
-   │  ├─ style-sheet.ts          # doc-scoped <style>, dedup + prune
-   │  ├─ layers/                 # page, objects, print profile
-   │  ├─ text-measure.ts
-   │  ├─ types/                  # object-type renderers: group, shape, image, textFrame
-   │  ├─ paint.ts                # Paint/Stroke → CSS
-   │  └─ export/                 # svg, print/pdf, raster
-   ├─ editor/                    # imports model, render, core
-   │  ├─ store/                  # DocStore, EditorStore, UiStore, dispatch
-   │  ├─ history.ts              # transactions, coalescing, undo/redo
-   │  ├─ commands-registry.ts    # named commands + menu bindings
-   │  ├─ selection.ts
-   │  ├─ modes.ts                # select / textEdit / draw / hand / zoom
-   │  ├─ tools/                  # select, marquee, move, resize, rotate, pen, shapes, …
-   │  ├─ interaction/            # pointer pipeline, keyboard map, gestures
-   │  ├─ transform/              # resize/rotate/align/distribute algorithms
-   │  ├─ snapping/               # SnapEngine, candidates, smart guides
-   │  ├─ guides/                 # guide model ops + overlay drawing
-   │  ├─ viewport/               # zoom, pan, fit, page virtualization
-   │  ├─ overlay/                # screen-space drawing API
-   │  ├─ clipboard.ts
-   │  └─ text-edit/              # TextEditSession — the fenced DOM-authoritative zone
-   ├─ ui/                        # imports editor, model, core, persist. No render/ internals.
-   │  ├─ app.ts                  # composition root
-   │  ├─ chrome/                 # top bar, toolbar, status bar, menus, shortcuts
-   │  ├─ panels/                 # layers, pages, assets, document
-   │  ├─ inspector/              # schema-driven field rendering + sections
-   │  ├─ controls/               # internal control kit
-   │  ├─ persistence.ts          # file gateway + saved-baseline/dirty-state rules
-   │  ├─ dialogs/
-   │  └─ reactive.ts             # tiny render-on-change helper
-   ├─ persist/                   # imports model, core. A leaf: no DOM, no editor, no ui.
-   │  ├─ format.ts               # the vocabulary: constants, key lists, validation
-   │  ├─ serialize.ts            # document -> canonical persisted value
-   │  ├─ deserialize.ts          # persisted value -> document, or a refusal naming a path
-   │  ├─ migrations/             # v1to2.ts, v2to3.ts, index.ts (chain)  -- NOT YET
-   │  ├─ storage/                # indexeddb, fs-access, download        -- NOT YET
-   │  └─ document-service.ts     # open/save/autosave/recover            -- NOT YET
-   └─ platform/                  # env detection, capabilities, feature flags
+│  ├─ editor/                    # 40 files: interaction, geometry, snapping, layers, print, …
+│  ├─ persist/                   # format, validation, session, group persistence, golden round-trip
+│  ├─ spike/                     # text-editing spike specs (the known __spike flake lives here)
+│  ├─ visual/                    # Playwright screenshot diffs + the shared harness
+│  └─ golden/                    # .p1doc fixtures, byte-compared (-text in .gitattributes)
+└─ index.html, spike.html, vite.config.ts, playwright.config.ts, eslint.config.js, tsconfig.json
 ```
+
+**This section previously described a target structure rather than the built one**, and the two had
+diverged for several milestones. The list below is what the original plan called for and does not exist
+yet, recorded here so the intent is not lost and so nobody goes looking for it:
+
+| Planned | State |
+|---|---|
+| `fixtures/` (golden files per format version) | superseded by `tests/golden/` |
+| `tests/unit/`, `tests/e2e/` | never created; unit specs live beside the code as `src/**/*.test.ts`, browser specs under `tests/` |
+| `benchmarks/` | not started |
+| `docs/guides/` | not started |
+| `src/platform/` (env detection, feature flags) | not needed so far; capability checks are local |
+| `src/core/immutable.ts`, `events.ts`, `registry.ts`, `result.ts` | folded into the modules that needed them |
+| `src/model/schema.ts`, `selectors.ts` | schema language and memoised reads were not needed; the inspector is schema-driven from `shapes.ts` |
+| `src/editor/clipboard.ts`, `commands-registry.ts`, `tools/`, `interaction/`, `snapping/`, `guides/`, `overlay/` | not created as directories; snapping is `src/model/snap.ts` and the gesture pipeline is `src/editor/editor.ts` |
+| `src/render/style-sheet.ts`, `dom-pool.ts`, `text-measure.ts`, `export/` | superseded by `document-view.ts` + `dom-style.ts`; `export/` became `src/ui/print-profile.ts` |
+| `src/ui/panels/`, `controls/`, `dialogs/`, `reactive.ts` | not created; the inspector is one file and the chrome is three |
+| `src/persist/migrations/`, `storage/`, `document-service.ts` | still owed — no migrations, no autosave, no IndexedDB (§8.2, ADR 0007) |
 
 ### 8.1 Dependency rule (enforced)
 
@@ -1651,7 +1682,7 @@ not defensive padding; they are what makes the assertion after them mean anythin
 
 **A fourth rule, learned in M7: a mutation is the only proof that a test can fail.**
 The M6 suite had no negative controls — nothing verified that breaking a behaviour would fail
-the test claiming it. `scripts/mutation-check.ps1` now breaks twenty behaviours one at a time,
+the test claiming it. `scripts/mutation-check.ps1` now breaks 112 behaviours one at a time,
 asserts the relevant suite goes red, and restores the file; a mutation that no test notices is
 reported as a failure. Three gaps it found, all of which were green:
 
@@ -1661,11 +1692,12 @@ reported as a failure. Three gaps it found, all of which were green:
 * The `is clean after save, edit, and undo` test was passing without the save having
   happened: `save()` suspends at its `await`, and the assertion ran before the baseline
   moved. Every other assertion in it was about undo alone.
-* Two of the twenty mutations were run through Vitest against `.spec.ts` files, which Vitest
-  silently collects none of — so "no tests found" read as a pass. The harness now dispatches on
+* Two of the twenty mutations *at the time* were run through Vitest against `.spec.ts` files, which Vitest
+  silently collects none of - so "no tests found" read as a pass. The harness now dispatches on
   file kind.
 
-Run it with `& scripts\mutation-check.ps1`. It is slow (each mutation runs a suite) and it is
+Run it with `& scripts\mutation-check.ps1`. It is slow — each mutation runs a suite, and a full
+112-mutant run is roughly 16–25 minutes on the machine this was developed on — and it is
 worth it: it is the only thing in the repository that can tell you a green suite means
 something.
 
@@ -1754,13 +1786,23 @@ Each milestone ends with something demonstrable and a green test suite.
 | ~~**M10**~~ | ~~Grouping~~ **Re-scoped by M10** | **Done as an investigation.** Both representations proved; neither built. The finding is that grouping and multi-object resize are *one* missing capability — a representable parent-child composition — so the next architectural question is the shear decision (ADR 0010 §7), not a group feature. M10 also corrected two ADR 0008 limitations and made the no-shear invariant a runtime check | M8, M9 |
 | **M10b** | Affine transforms | **Done — refused.** The inventory found 28 assumption sites, 9 of which need nothing and 7 of which are representation-only; the other 7 are semantics, and they cluster in rotation, the selection frame, and the stroke. The candidate model is specified and proved in `src/core/geom/affine.ts`, and the extension is one field away — refused because it buys exactly one capability with no writer, and because the stroke decision has no cheap answer. **Decision: RESTRICT GROUPS** | ADR 0010, ADR 0008 |
 | ~~**M11**~~ | ~~Persistence (the rest)~~ | **Re-scoped, not renamed.** The persistence *of groups* was done in M12: `formatVersion: 2`, version 1 still read, **no migration needed** — a version-1 document is a strict subset. What remains is autosave to IndexedDB, crash recovery, File System Access save-in-place, project folders for `{ external }`, asset garbage collection. Deferred because none of it is a prerequisite for anything now. | M0, M7 |
-| **M12** | Group **model** | **Done — [ADR 0012](adr/0012-persistent-group-model.md).** `GroupNode`, group-local children, nesting, uniform-only group scale, `tree.ts`, `formatVersion: 2`. **No interaction built.** |
-| **M13** | Group **interaction** + page/object operations | **group/ungroup gestures, selecting a group, group dragging and transform handles (uniform-only), duplicate, copy/paste (internal + foreign adapters), alignment/distribution, delete, layer panel, snapping.** The paste adapter is the first real consumer of the format-preserving normalizer | ADR 0012 §14, M5, M8 |
+| **M12** | Group **model** | **Done - [ADR 0012](adr/0012-persistent-group-model.md).** `GroupNode`, group-local children, nesting, uniform-only group scale, `tree.ts`, `formatVersion: 2`. **No interaction built.** | ADR 0010, M11 |
+| **M13** | Group **interaction** + page/object operations | **Partly delivered, as two milestones.** Group interaction shipped: `group`/`ungroup` gestures, selecting a group, group scope, group dragging — [ADR 0013](adr/0013-group-interaction.md). Alignment/distribution shipped as the delivered **M16** ([ADR 0016](adr/0016-alignment-and-distribution.md)) and snapping as the delivered **M17** ([ADR 0017](adr/0017-snapping-and-guides.md)). **Still owed:** duplicate, copy/paste (internal + foreign adapters), delete, layer panel | ADR 0012 §14, M5, M8 |
 | **M13** | Styles | Named paragraph/character/object styles, `styleId` resolution, styles panel, apply/clear, "no style" handling | M3, M4 |
 | **M14** | Page management & document setup | Add/duplicate/delete/reorder pages, per-page size & orientation, margins/columns, bleed marks, document dialog with live preview | M1, M8 |
-| **M15** | Output | Print profile, PDF export via print, SVG export, page previews/print preview panel | M8, M11 |
+| **M15** | Output | **Partly delivered as the M19 milestone**: print profile and PDF export via `window.print()` ([ADR 0018](adr/0018-print-profile-and-pdf-export.md), §6.4). **Still owed:** SVG export, page previews / print-preview panel | M8, M11 |
 | **M16** | Import | SVG import, image import, HTML/rich-text paste normalization, basic PDF import spike | M9 |
 | **M17** | Advanced | Text-on-path, tables, footnotes, variables, plugin API, scripting via the command bus, master pages, XML-ish tagging for export | M10b+ |
+
+**A note on the numbering, because the two schemes now disagree.** This table is the *original plan*,
+written before delivery, and it was never renumbered — which is correct, since rewriting history to match
+outcomes would destroy the record of what was intended. The *delivered* milestones reused the same labels
+for different work: plan-M14 (page management) and plan-M15 (output) are still owed, while the delivered
+M14 was asset garbage collection and the delivered M19 was print/PDF export. Where this document means the
+plan it says "plan-M…"; everywhere else, and in the Status table and the ADRs, M-numbers are the delivered
+ones. Two rows also changed meaning rather than just falling behind: plan-M6 (guides, grid, snapping) was delivered as images in M6; its snapping half shipped as the delivered
+M17, but only **transient, screen-space guides** — persisted guides and the grid are still owed. Plan-M7 was
+delivered as persistence with its resource half (registry, asset panel, IndexedDB blob storage) still owed.
 
 ### 10.1 Ordering rationale
 
@@ -3317,7 +3359,9 @@ reference for the format.
   with objects collapsed onto one line, which must load to the same document.
   `scripts/make-golden-assets.mjs` regenerates the inline PNGs; they are generated rather
   than hand-written for the reason M6 established.
-- **`scripts/mutation-check.ps1`** — twenty mutations, each asserted to turn a suite red.
+- **`scripts/mutation-check.ps1`** — twenty mutations as of M7, each asserted to turn a suite red.
+  The corpus has since grown to 112 and the harness has been reworked twice (§8.2); the corpus itself
+  lives in `scripts/mutations.ps1`.
 
 ### Architectural changes
 
@@ -4321,5 +4365,142 @@ node" and the first structural command will need it. Recorded as a deliberate ex
 project's objection to unused code.
 
 ---
----
 
+## M13 implementation notes - Group interaction
+
+**Not written at the time.** The milestone was delivered and recorded in
+[ADR 0013](adr/0013-group-interaction.md); this section is a pointer, added later so the Status
+table's link resolves. What the ADR settles, and why it is worth reading rather than skimming:
+
+- Grouping is a **pure structural array move** on M12's theorem — no new node type, no reparenting
+  protocol, and therefore nothing new for the reconciler, the serializer or hit testing.
+- The **ancestor/descendant selection invariant** is enforced in `setSelection` rather than filtered
+  afterwards, so it holds by construction.
+- `tree.ts` exposes four look-alike lookups with **different reachability** (`placementOf` finds leaves
+  only, `nodeById` finds everything, `pageIdOf` answers `null` for a group). M13 shipped a selected group
+  that drew no outline because it used `pageIdOf`, and every other signal said the object was there.
+  ADR 0014 later hit the same seam and settled on `placementsInDocument` as the one traversal.
+- **Explicitly out of scope, by decision:** group resize, group scale handles, a layer panel, and any
+  group-specific inspector.
+
+## M15 implementation notes - Boot reliability
+
+**A harness fix, not a feature.** Recorded here because the symptom looked like an application bug and
+was not one.
+
+Roughly one test per full browser run died on a boot that produced no `[data-page]`. The harness reported
+`no [data-page] within 15s` *alongside* `readout: "100%"`, and those were read as contradictory — an app
+that painted chrome but no document.
+
+They were not. `index.html` ships `<output data-zoom-readout>100%</output>` as **static markup**, so "100%"
+was the default, present before any application JavaScript ran. The harness comment claiming the readout
+was populated only after boot completed was false, and the readiness condition built on it was therefore
+always half-true — contributing nothing while looking like a safeguard.
+
+**Root cause.** A dev-mode boot pulls the module graph over ~49 separate requests, and one long-lived Vite
+dev server served all of them. Every boot spent dozens of short-lived sockets, each lingering in
+`TIME_WAIT` for 240s against a 16,384-port dynamic range. Over a full run the OS ran out:
+
+```
+/src/render/assets.ts -> status -1, _failureText "net::ERR_NO_BUFFER_SPACE"
+```
+
+Windows logged Tcpip event 4231 in the same second — *"a request to allocate an ephemeral port number has
+failed due to all such ports being in use"*. The browser abandoned a request that never reached the
+server, so `app.ts` was never evaluated.
+
+**Fix.** The browser suite is served the **production bundle** for `/`, with the dev server reachable only
+through the preview server's proxy for `spike.html`. The module graph collapses to a handful of built
+assets, and the ephemeral-port pressure goes with it.
+
+The lasting consequence is load-bearing for everything else in this file: **browser tests serve `dist/`, not
+the dev server**, so a source change is invisible to them unless `dist/` is rebuilt. `mutation-check.ps1`
+rebuilds before every browser mutant for exactly this reason, and this milestone is why that is not
+optional.
+
+## M16 implementation notes - Alignment and distribution
+
+See [ADR 0016](adr/0016-alignment-and-distribution.md). Three decisions worth carrying:
+
+- Alignment operates on **painted bounds in page space**, not on model frames, because a rotated or scaled
+  object's visible box is not its model rectangle.
+- **The aggregate box is calculation data, never geometry.** Alignment needs a box for the whole
+  selection; ADR 0010 had already refused an aggregate selection frame as a rectangle *presented to the
+  user*. `arrangeBounds` computes the union for arithmetic and never draws it. This is the distinction
+  that keeps M16 from reopening the M8/M10 decision.
+- The **page/parent coordinate boundary** is resolved explicitly rather than by convention, so a
+  selection spanning pages has a defined answer.
+
+A later correction is recorded against it: `distributionDeltas` stores only `sorted.slice(1, -1)`, so
+for two objects the delta map is **structurally empty** rather than zero-filled. A test that assumed both
+anchors were present was asserting an implementation detail; it now derives the result from the gap.
+
+## M17 implementation notes - Snapping and guides
+
+See [ADR 0017](adr/0017-snapping-and-guides.md).
+
+- **What snapping measures:** the moving box against page features and other objects, in document space.
+- **The threshold has to survive zoom**, so it is defined in *screen* pixels and converted:
+  `snapThresholdDocument(zoom) = 10 / zoom`. A fixed document-space constant makes snapping stop working
+  as the user zooms in, which is the defect the mutant `the threshold uses a fixed document-space
+  constant, so zoom stops mattering` pins.
+- **Choosing a snap:** page features are scanned first, so a tie goes to stable geometry rather than to
+  whichever object happened to be iterated last.
+- **Alt** suppresses snapping, and the two moments are split in time: at pointer-down Alt means *select
+  the containing group*, during the drag it means *do not snap*.
+- **Guides are derived, transient, screen-space state** — never persisted, and cleared in both `pointerUp`
+  and `cancelGesture`.
+
+### F21 - the defect this milestone's own testing found
+
+The moving box must be **captured once at pointer-down** (`Gesture.bounds`), not re-derived from the
+document each frame. The move gesture dispatches `setTransform` every frame, so `this.doc` holds the
+*previous, already-snapped* position; re-deriving compounds the snap each frame.
+
+The symptom was a snap **140px away from the object**, and Alt appearing broken. What made it findable
+was that `computeSnap` was verified correct *on the exact failing numbers* while the browser was not —
+the defect was upstream of the engine everyone was reading.
+
+## M18 implementation notes - Visibility semantics
+
+**`visible: false` is not a rendering detail.** Three parts of the system already agreed about it:
+
+- `render/document-view.ts` propagates `visible: false` down a hidden group's subtree;
+- `isEffectivelyVisible` in `editor/selection.ts` refuses to hit-test a node whose ancestor chain is
+  hidden;
+- ADR 0012 §A10 recorded the rule for the model.
+
+The outlier was a comment in `arrange.ts`'s `boxFor` claiming a group is dropped when all its children are
+invisible. Measurement showed it was not. **The comment was directionally right and the code was wrong** —
+so the contract was established from the renderer, `selection.ts` and ADR 0012 rather than from the
+comment, and `arrange.ts` now filters placements.
+
+Effective visibility is therefore: **a node is visible when it and every ancestor are visible.**
+
+Snapping inherits this for free, because it consumes the same arrangement targets. The milestone's real
+content is that a rule three subsystems already implemented became written down in one place.
+
+## M19 implementation notes - Print profile and PDF export
+
+See [ADR 0018](adr/0018-print-profile-and-pdf-export.md) and §6.4.
+
+- **Export is `window.print()`.** There is no PDF writer and no second representation of the document —
+  the browser's own paginator is the renderer, which is the only way to get real page boxes without
+  reimplementing text layout.
+- **The profile is split in two**, because CSS cannot read the model: a static `@media print` block in
+  `styles.css`, plus a dynamic injected `<style data-print-profile>` holding
+  `@page { size: …; margin: 0 }`, re-derived from `doc.pageSize` on every store change.
+- `printSheetSize` **reuses `pageExtentPx`**, so the sheet and the page cannot disagree about orientation.
+- **Chrome is hidden, not removed**, so printing mutates no editor state.
+
+### The defect worth remembering
+
+Three print rules must beat *inline* styles written by `viewport.ts` and `document-view.ts` — `transform`
+on `.pages`, `width`/`height` on `.canvas`, `top` on `.page`. The canvas spacer's height in particular
+made a 3-page document print as **4 sheets**. It was invisible to every DOM assertion and was found only by
+**counting sheets in a generated PDF**, which is why `tests/editor/print.spec.ts` asserts on a real
+`page.pdf()` and reads `/MediaBox` rather than on the DOM.
+
+`print-color-adjust` is separately unobservable headlessly: it does not change computed `background-color`,
+and Playwright's `printBackground` is Chromium's own switch. Those tests assert the instruction is present
+*and* that the colour reaches the PDF.

@@ -489,8 +489,10 @@ paths, stroke alignments other than `inside`, gradients, patterns and shadows �
 `object-position`, no non-rectangular frames, no external asset resolution — see
 [ADR 0006](docs/adr/0006-image-asset-contract.md).
 
-One rough edge worth naming rather than hiding: **orphaned image assets are never collected**
-([ADR 0014](docs/adr/0014-asset-garbage-collection.md)).
+One rough edge worth naming rather than hiding: **unused image bytes are only collected when you ask.**
+`pruneAssets` exists and does the job correctly ([ADR 0014](docs/adr/0014-asset-garbage-collection.md)) —
+one command, so one collection is one undo step — but nothing calls it implicitly, and it has no menu or
+toolbar item yet. It is reachable only as the editor action *"Clean up unused images"*.
 
 ## Verifying it
 
