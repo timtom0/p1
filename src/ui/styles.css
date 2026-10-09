@@ -773,3 +773,120 @@ body {
 .p1-inspector-note:empty {
   display: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Print profile (M19)
+
+   The browser's print workflow, given a page profile it can honour. Because the
+   document *is* HTML and CSS, exporting is not a second renderer -- it is this
+   stylesheet plus the dynamic `@page` rule `ui/print-profile.ts` injects from the
+   document's own page size.
+
+   Three groups of rules, in the order they have to be read:
+
+   1. What is *not* document content. The toolbar, rulers, inspector, status bar
+      and the overlay layer are screen chrome; selection outlines, resize handles,
+      the rotation grip and snap guides are drawn *into* the overlay, so hiding it
+      removes all of them at once rather than each by class name.
+   2. What is a *screen affordance* wearing the document's clothes. The zoom
+      transform, the canvas margin, the stack's drawn edge, and the scroll/flex
+      containers that clip to a viewport. Two of these are written **inline** by
+      the viewport and the renderer, so no stylesheet rule can beat them without
+      `!important`.
+   3. What must survive. Page clipping stays (`.page { overflow: hidden }` is
+      untouched), and authored backgrounds are forced on -- a document page with a
+      fill is document content, not decoration.
+--------------------------------------------------------------------------- */
+@media print {
+  /* 1. Editor chrome. `.overlay` carries every selection outline, handle, the
+        rotation grip and every snap guide, so one rule retires all of them. */
+  .toolbar,
+  .ruler-corner,
+  .ruler,
+  .inspector,
+  .status,
+  .overlay {
+    display: none !important;
+  }
+
+  /* 2. The scroll shell. `body { overflow: hidden }` and `.surface { overflow:
+        hidden }` are what stop the printed page from being clipped to a
+        viewport-sized box. */
+  html,
+  body {
+    height: auto;
+    overflow: visible;
+    background: #ffffff;
+  }
+
+  .app {
+    display: block;
+    height: auto;
+  }
+
+  .surface {
+    display: block;
+    position: static;
+    overflow: visible;
+  }
+
+  .viewport {
+    display: block;
+    overflow: visible;
+    background: none;
+  }
+
+  .canvas {
+    margin: 0;
+    /*
+     * The canvas is the *scroll spacer*, and `viewport.ts` writes an inline
+     * `width`/`height` of `stack x zoom` onto it so the scrollbars tell the truth. That is
+     * exactly right on screen and exactly wrong here: the spacer keeps whatever height the
+     * zoomed stack implied, so a three-page stack printed four sheets, the fourth blank.
+     *
+     * Found by generating a PDF and counting pages, which is the only way to see it -- the DOM
+     * reports the stack at 907px, the spacer at 971px, and nothing visible in between.
+     */
+    width: auto !important;
+    height: auto !important;
+  }
+
+  /* The stack's paper edge, drawn by `.canvas::before`. Not document content. */
+  .canvas::before {
+    display: none;
+  }
+
+  /* Zoom. `viewport.ts` writes `transform: scale(z)` inline onto `.pages`, so
+     this override cannot be expressed without `!important`. */
+  .pages {
+    position: static;
+    transform: none !important;
+  }
+
+  /* One document page per printed sheet. Pages are absolutely positioned on
+        screen and stacked with a gap, so the gap and the absolute offsets are
+        inline values that have to be undone explicitly. */
+  .page {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  /* No trailing blank sheet after the last page. */
+  .page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  /* 3. Authored backgrounds and fills. Without this the browser drops them,
+        which would print a coloured page as white paper. */
+  .page,
+  .objects,
+  .p1-object {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

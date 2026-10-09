@@ -59,6 +59,17 @@
           <button type="button" data-doc="new" title="New document">New</button>
           <button type="button" data-doc="open" title="Open a .p1doc">Open</button>
           <button type="button" data-doc="save" title="Save (Ctrl+S)">Save</button>
+            <!--
+              Export PDF goes through the browser's own print workflow (`window.print()`), against the
+              print profile in `ui/styles.css` plus the dynamic `@page` rule from `ui/print-profile.ts`.
+
+              A button rather than a keyboard chord, deliberately: it opens a *browser dialog*, and a
+              dialog is not an undoable document edit. No modifier chord should be able to fire one by
+              accident -- and unlike save, there is nothing to lose if it takes two clicks.
+            -->
+            <button type="button" data-doc="export-pdf" title="Export PDF through the print dialog">
+              Export PDF
+            </button>
           <input
             type="file"
             accept=".p1doc,application/json"

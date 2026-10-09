@@ -45,6 +45,7 @@ import { Editor } from '../editor/editor';
 import { Rulers } from './chrome/ruler';
 import { bindShortcuts } from './chrome/shortcuts';
 import { bindEditingShortcuts } from './chrome/editing-shortcuts';
+import { applyPrintProfile, exportPdf } from './print-profile';
 import { mountInspector } from './inspector';
 import { DocumentSession, browserGateway } from './persistence';
 import { createDocument } from '../model/factory';
@@ -419,7 +420,15 @@ function main(): void {
    * the inspector committed a field without this, the model changed and nothing on
    * screen did — a silent divergence that only undo exposed.
    */
-  store.subscribe(() => project());
+  store.subscribe(() => {
+    project();
+    // Keep the print profile's `@page` size in step with the document, including when a different
+    // document is opened. Derived UI state, so it belongs on the same path as every other
+    // projection -- and it writes only a `<style>` element, never the model, so this cannot dirty
+    // anything. Page size is not authorable in the UI; it arrives from the file or a new document,
+    // which is exactly the case that would otherwise leave a stale sheet size behind.
+    applyPrintProfile(store.state.pageSize);
+  });
 
   /**
    * Buttons mirror the editor's *effective* target, not the store's.
@@ -506,6 +515,9 @@ function main(): void {
   // ---- initial paint -------------------------------------------------------
   recordBootStep('boot:paint:begin', { pages: doc().pages.length });
   project();
+  // The store subscription only fires on *change*, so the print profile needs seeding here or the
+  // first Export PDF would publish a page size belonging to whichever document was open before.
+  applyPrintProfile(store.state.pageSize);
   recordBootStep('viewport.fit:enter');
   viewport.fit();
   recordBootStep('viewport.fit:return');
@@ -590,6 +602,13 @@ function main(): void {
     }
     if (documentAction === 'save') {
       void withDocumentFeedback(() => documentSession.save());
+      return;
+    }
+    // Export is a print, not a document edit: no transaction, no dirty flag, no history entry. The
+    // document handed to exportPdf is the current state purely so the profile it publishes is
+    // provably the one on screen.
+    if (documentAction === 'export-pdf') {
+      void exportPdf(store.state);
       return;
     }
 

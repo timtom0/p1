@@ -64,6 +64,9 @@ interaction and persistence; the DOM is a disposable projection of that model.
 - [ADR 0017 — snapping and guides](docs/adr/0017-snapping-and-guides.md) — the 10-screen-pixel
   threshold and the zoom conversion it needs, how a candidate is chosen, why Alt, and
   the defect that made a drag snap to a candidate 140px from the object on screen.
+- [ADR 0018 — print profile and PDF export](docs/adr/0018-print-profile-and-pdf-export.md) —
+  why export is `window.print()` against a stylesheet rather than a PDF writer, why the `@page` size
+  has to be injected rather than declared, and the three inline styles a print profile has to beat.
 - [Visual tests](tests/visual/README.md) — browser verification of the renderer
   and the viewport.
 
@@ -117,7 +120,7 @@ every source mutant silently reports "NOT FOUND" and the tool stops testing anyt
 still reporting survivors. `spike.html` stays excluded from the bundle and is proxied to
 the dev server.
 
-## Current state: M18
+## Current state: M19
 
 The document is editable, its text is a real document format rather than a record of what
 the browser happened to write, it **survives closing the tab**, several objects can be
@@ -405,6 +408,52 @@ Loading **never waits for an image to decode**: a document with a broken image o
 instantly behind a marked placeholder, so loading can only fail because the document is
 malformed, never because a picture would not paint.
 
+## Printing and PDF export
+
+**Export PDF** in the document toolbar opens the browser's own print dialog, with the document already
+described to it: one document page per sheet, at the page size the document says, in the order the pages
+are in.
+
+> You get a PDF out of *your* print dialog. "Save as PDF" is one of its destinations — which means the
+> usual choices are yours: destination, paper, scaling, and whether to print backgrounds. The editor
+> sets the sheet geometry and gets out of the way.
+
+It works because the document *is* HTML and CSS, so a printed page is laid out by the same code that
+draws the screen. Export does not render a second copy of anything — there is no export pipeline, no
+second representation, and no fidelity setting, because there is nothing to degrade.
+
+What the print profile does, in three groups:
+
+- **Hides the editor.** Toolbar, rulers, inspector, status bar, and the overlay layer — which is where
+  selection outlines, resize handles, the rotation grip and every snap guide are drawn, so one rule
+  retires all of them. It *hides* rather than tears them down, because printing must not change editor
+  state, and the tests assert invisibility rather than absence for exactly that reason.
+- **Removes the screen's furniture.** The zoom transform, the canvas margin, the stack's drawn paper
+  edge, and the scroll containers that clip to a viewport. Three of those are written **inline** by
+  the viewport and renderer, so no stylesheet rule beats them without `!important` — and one of them,
+  the canvas spacer's zoomed height, is what made a three-page document print four sheets before it was
+  found. Only generating a PDF and counting sheets could see it.
+- **Keeps what is document content.** Page clipping is untouched, so an object hanging off the page is
+  still clipped; and backgrounds are forced on with `print-color-adjust: exact`, so a coloured page
+  prints as paper rather than as white.
+
+The sheet comes from the document: a page authored in millimetres gets `@page { size: 210mm 297mm }`,
+one authored in inches gets `8.5in 11in`, and landscape is the renderer's own orientation rule rather
+than a swap re-implemented here. **A4 is nowhere in the code** — it is a choice this editor does not
+make for you. Page size is not authorable in the UI; it arrives from the file or from New.
+
+**Two limitations worth stating rather than discovering.**
+
+- **Backgrounds depend on the browser's own switch.** Playwright's headless `printBackground` flag is
+  Chromium's, and does not consult `print-color-adjust`, so the CSS declaration's real-world effect can
+  only be seen in a real print dialog. What the tests verify is that the instruction is present and
+  that the authored colour does reach the PDF.
+- **Images are awaited before printing.** A print dialog is a snapshot, and a user cannot tell "not
+  loaded yet" from "deliberately blank", so export waits for each image to decode — with a bounded
+  wait, because printing must not hang and a broken image is already a marked placeholder.
+
+See [ADR 0018](docs/adr/0018-print-profile-and-pdf-export.md.
+
 ## What is not painted is not geometry
 
 `visible: false` is not a rendering detail, and M18 established that in the geometry layer.
@@ -446,17 +495,17 @@ One rough edge worth naming rather than hiding: **orphaned image assets are neve
 ## Verifying it
 
 ```bash
-npm test                            # 904 unit tests
-npm run test:visual                 # 617 browser tests, 25 visual baselines
-.\scripts\mutation-check.ps1        # 102 deliberate breakages, each asserted to fail a suite
+npm test                            # 911 unit tests
+npm run test:visual                 # 635 browser tests, 25 visual baselines
+.\scripts\mutation-check.ps1        # 112 deliberate breakages, each asserted to fail a suite
 ```
 
 That last one is unusual and worth explaining. A green suite says nothing on its own unless
-a test *would* have failed, so `mutation-check.ps1` breaks 102 behaviours one at a time — dirty
+a test *would* have failed, so `mutation-check.ps1` breaks 112 behaviours one at a time — dirty
 state, the save baseline, the text fence at save time, asset ordering, version refusals, id
 reservation, the layer-order no-op rule, page-to-local conversion, snapping's threshold and
-tie-break, visibility in arrangement bounds, the tool shortcuts — and asserts the relevant suite turns
-red. **101 are detected.** It found real gaps in tests that were otherwise passing, including one
+tie-break, visibility in arrangement bounds, the tool shortcuts, the print profile — and asserts the relevant suite turns
+red. **111 are detected.** It found real gaps in tests that were otherwise passing, including one
 dirty-state test that passed *without the save having happened*.
 
 It also carries a **documented list of what it cannot cover**, and that list is the point.

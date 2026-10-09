@@ -706,7 +706,7 @@ safe side of this line: every API in the §2.6 contract is a read.
 | 7 | **Text on a path, per-glyph transforms, optical sizing.** | `textPath` in a scoped SVG island object type; per-glyph transforms deferred. |
 | 8 | **Non-orthogonal / 3D transforms.** | Store a matrix override, apply `matrix()`, and keep hit-testing/handles in model space (which we own anyway). |
 | 9 | **Overprint, CMYK, separations, preflight.** | Out of scope for a screen-first editor; print profile is RGB. Revisit only if print fidelity becomes a goal. |
-| 10 | **Exact print output.** Browsers suppress backgrounds by default and apply scaling/margins. | A dedicated **print profile**: `@page { size: <exact>; margin: 0 }`, `-webkit-print-color-adjust: exact`, a print-only stylesheet, and a headless-print export path. Because our page *is* CSS, this is tractable — a major payoff of the chosen backbone. |
+| 10 | ~~**Exact print output.**~~ **Resolved in M19.** `window.print()` against a print profile: a `@media print` stylesheet plus a dynamic `@page { size: <exact>; margin: 0 }` injected from `doc.pageSize`. | Highest fidelity, lowest effort - a direct dividend of the HTML/CSS backbone. See [ADR 0018](adr/0018-print-profile-and-pdf-export.md). |
 | 11 | **DOM node budget** on very large documents. | Page virtualization (mount only visible pages ± 1), `content-visibility: auto` on off-screen pages, and resource decoding budgets. |
 | 12 | **DOM hit-testing is not usable.** `elementFromPoint` ignores our model (locked/hidden/alpha/shape-interior rules) and fights transforms. | Always hit-test in JS against the model via the geometry module, topmost-first with inverse matrices. |
 
@@ -1386,9 +1386,9 @@ const CURRENT_FORMAT_VERSION = 1;
 ### 6.4 Import / export roadmap
 
 
-* **PDF** — browser print against a print profile (`@page { size: <exact> }`,
-  `print-color-adjust: exact`, backgrounds forced on). Highest fidelity, lowest
-  effort — a direct dividend of the HTML/CSS backbone.
+* **PDF** - **done (M19).** Browser print against a print profile (`@page { size: <exact>; margin: 0 }`,
+  `print-color-adjust: exact`). See [ADR 0018](adr/0018-print-profile-and-pdf-export.md).
+
 * **SVG** — export from the model (we own the geometry), not by scraping DOM.
 * **PNG/JPEG** — rasterization needs research; candidates are printing to a
   canvas-backed path or `SVG foreignObject`. Spiked at M12, not assumed.

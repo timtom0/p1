@@ -32,7 +32,7 @@
 #
 # A mutation that no test can kill is either a coverage gap or an equivalent mutant, and the two deserve
 # opposite responses: a gap should be closed, an equivalent mutant should be recorded and never counted
-# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 102 undetected"
+# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 112 undetected"
 # is a decision rather than an oversight -- and so that the next milestone inherits a known quantity instead
 # of rediscovering it.
 #
@@ -752,3 +752,68 @@ Add-Mutation 'V arms a draw tool instead of returning to select' `
   'src\ui\chrome\editing-shortcuts.ts' `
   { param($t) $t.Replace("  v: 'select',", "  v: 'rect',") } `
   'tests/editor/tool-shortcuts.spec.ts'
+# --- M19 -- print profile and PDF export -------------------------------------------------
+#
+# Two groups, and the split matters. The size derivation is pure and is unit-tested; the stylesheet
+# only exists at print time, so it can only be checked by generating output.
+#
+# The stylesheet mutants are the interesting ones. They are all *absences* of an override -- drop this
+# `!important`, drop that `break-after` -- which is the shape a print profile fails in: the screen
+# layout is still correct and only the sheets are wrong. Each of these was checked by rebuilding
+# `dist/` and running the browser suite, because since M15 the suite serves the built bundle and a
+# stylesheet mutation that is not rebuilt cannot reach it at all (ADR 0016 F17).
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'the print sheet ignores orientation, so landscape prints portrait' `
+  'src\ui\print-profile.ts' `
+  { param($t) $t.Replace('  const extent = pageExtentPx(size);', '  const extent = { width: size.width, height: size.height };') } `
+  'src/ui/print-profile.test.ts'
+
+Add-Mutation 'the injected @page rule drops margin: 0, so every sheet gains a default margin' `
+  'src\ui\print-profile.ts' `
+  { param($t) $t.Replace('return `@page { size: ${printSheetSize(size)}; margin: 0; }`;', 'return `@page { size: ${printSheetSize(size)}; }`;') } `
+  'src/ui/print-profile.test.ts'
+
+Add-Mutation 'the print stylesheet leaves the editor toolbar in the output' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace("  .toolbar,`n  .ruler-corner,", '  .ruler-corner,') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'the print stylesheet leaves the selection overlay in the output' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace("  .status,`n  .overlay {", '  .status {') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'zoom is not neutralised for print, so the stack prints scaled' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace('    transform: none !important;', '    transform: none;') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'the canvas spacer keeps its zoomed inline height, so a page stack prints an extra blank sheet' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace("    width: auto !important;`n    height: auto !important;", '') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'pages do not break, so a multi-page document prints onto one sheet' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace("    break-after: page;`n    page-break-after: always;", '') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'the last page also breaks, so a trailing blank sheet is printed' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace("  .page:last-child {`n    break-after: auto;`n    page-break-after: auto;`n  }", '') } `
+  'tests/editor/print.spec.ts'
+
+# The site is the *standard* declaration. Mutating the `-webkit-` prefixed one instead is a
+# conditionally equivalent change: Chromium honours either, so with the standard property still
+# present the computed value does not move, and the mutant survives for a reason that has nothing to do
+# with whether backgrounds print. The prefixed declaration stays as the Safari fallback it is.
+Add-Mutation 'authored page backgrounds are dropped, so a coloured page prints white' `
+  'src\ui\styles.css' `
+  { param($t) $t.Replace('    print-color-adjust: exact;', '    print-color-adjust: economy;') } `
+  'tests/editor/print.spec.ts'
+
+Add-Mutation 'the print profile is written once and never updated, so a newly opened document keeps the old sheet size' `
+  'src\ui\print-profile.ts' `
+  { param($t) $t.Replace('    if (existing.textContent !== css) existing.textContent = css;', '    return css;') } `
+  'tests/editor/print.spec.ts'
