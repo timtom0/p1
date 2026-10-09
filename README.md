@@ -529,18 +529,27 @@ back — and the existing test asserted only that the inspector went *mixed*, wh
 satisfies. The M8 test asserts the whole delta, and a mutation of the fix is what keeps it
 fixed.
 
-**On running it: ~16 minutes, and why not faster.** The corpus is 36 browser mutants and 76 unit, and
-the browser ones used to cost 30-85s each — so a full run was ~34 minutes. The single change that fixed
-it was `--max-failures=1` on browser targets: the only question asked of a suite is "did it fail?", and
-for a detected mutant that is settled by the first failing test, so running the rest cannot change the
-answer. Browser mutants went from 30-85s to 3-16s and the whole corpus to **15.9 min**, with identical
-results.
+**On running it: ~16-25 minutes, and why not faster.** The corpus is 36 browser mutants and 76 unit. The
+one change that halved it was `--max-failures=1` on browser targets: the only question asked of a suite is
+"did it fail?", and for a detected mutant that is settled by the first failing test, so running the rest
+cannot change the answer. Browser mutants went from 30-85s to 3-16s each.
 
-Parallelism across *mutants* was implemented and then measured, and it is **off by default** because on
-an ordinary 4-core machine it is much worse than useless: a 5-mutant browser slice went from 48s serial
-to 1079s across 4 workers, and 17 unit mutants from 77s to 1016s. It is kept behind `-Workers` because
-it is correct and would pay on a larger machine, but the honest summary is that one flag is the entire
-win. The measurement is recorded next to the code.
+Parallelism across *mutants* is implemented and **off by default**, because on an ordinary 4-core machine
+it does not pay: a mixed slice of 8 mutants measured 111.6s serial against 187.7s across 4 workers, run back
+to back. Four concurrent Chromium instances contend for the thing the browser mutants need, and the unit
+half cannot make up for it — four concurrent Vitest runs beat four serial ones by only 1.24x. It stays
+behind `-Workers` because it is correct and would pay with cores to spare.
+
+Two things that look like obvious next steps were measured and rejected: `--bail=1` for the unit half (the
+analogue of the flag above) is **2.3x slower**, and dropping the per-mutant `vite build` is not possible at
+all — since the browser suite is served `dist/`, that build *is* the mechanism by which a source mutation
+reaches a browser test.
+
+One caution when reading any of these numbers: this machine's wall clock drifts. The slowest mutant in the
+corpus measured 62.2s and later 97.4s on byte-identical code, and a full serial run measured 15.9 min and
+later 24.4 min. Comparisons here are only meaningful when taken back to back, and an earlier version of
+this file quoted a 22x figure that was really a broken server lifecycle rather than a property of
+parallelism.
 
 The implementation notes behind all of this are in
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) — the

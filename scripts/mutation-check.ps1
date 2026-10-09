@@ -62,16 +62,34 @@ $ErrorActionPreference = 'Continue'
 #   3. **`npx` -> the direct binary (~2.5-3s per mutant, ~2.5 min over a full run).** `npx` spawns a
 #      Node wrapper and re-resolves the package for every invocation; the runner does not need it,
 #      since the dependency is already installed.
+#   4. **One dev server for the whole run.** `playwright.config.ts` already sets `reuseExistingServer: !CI`,
+#      but nothing ever left a server running, so every browser mutant spawned `vite` and waited for the
+#      readiness probe. This script starts one, keeps it for every mutant, and stops it in a `finally`.
+#      In the parallel path the parent starts one *per workspace* and the workers never start one at all --
+#      see `Start-DevServer`, where doing that from inside a `Start-Job` does not work.
+#
 #   5. **`--max-failures=1` on browser targets (M19). 34.3 min to 15.4 min.** The only question asked of a
 #      suite is "did it fail?", and for a detected mutant that is settled by the first failing test; the rest
 #      cannot change the answer. Measured on the print suite: 70.3s down to 30.0s for one mutant, and over
 #      the full corpus the browser mutants went from the ~30-85s quoted above to 3-16s each. Detection is
 #      unaffected -- the check is `$out -match '\d+ failed'` and Playwright still prints `1 failed`.
 #
-#   4. **One dev server for the whole run (~3.4s per browser mutant, ~1 min over a full run).**
-#      `playwright.config.ts` already sets `reuseExistingServer: !CI`, but nothing ever left a server
-#      running, so every browser mutant spawned `vite` and waited for the readiness probe. This
-#      script starts one, keeps it for every mutant, and stops it in a `finally`.
+# And two more things that were measured and **not** adopted, recorded because both are the obvious next
+# idea and both cost real time to establish:
+#
+#   * **`--bail=1` on Vitest targets**, the direct analogue of lever 5 for the unit half. Detection would
+#     survive it (Vitest still prints `Failed Tests 1`, so `$out -match '\d+ failed'` holds), but it is
+#     **2.3x slower**: 22.1s against 9.6s on `tests/persist/session.test.ts`. Bail changes Vitest's run
+#     mode, and what it saves in test time it more than gives back in collection and teardown.
+#   * **Dropping the per-mutant `vite build`.** Not possible, and the reason is the mechanism rather than an
+#     accident: since M15 the browser suite is served `dist/`, so a source mutation reaches a browser test
+#     *only* through a rebuild. `tsc --noEmit` was already once per run, not per mutant; the build is ~4.5s
+#     and is the price of the mutation being real.
+#
+# **Wall-clock figures from this machine are only comparable when measured back to back.** The slowest
+# mutant in the corpus measured 62.2s and then 97.4s on *byte-identical* code hours apart, and a full
+# serial run measured 15.9 min and then 24.4 min. That is not this script changing; it is the box. Every
+# comparison recorded above was re-measured adjacently for that reason, and any future one should be too.
 #
 # And one measured-and-rejected:
 #
@@ -82,25 +100,29 @@ $ErrorActionPreference = 'Continue'
 #     would; it was removed rather than left in as unused configuration. `playwright.config.ts` now
 #     records the measurement next to `workers: 1`.
 #
-#   * **Parallelism across *mutants*, likewise: measured, implemented, and left off by default.** The
-#     rejection above is about splitting the tests of one mutant. This was splitting the mutants, each
-#     with its own workspace copy, its own bundle, its own server and its own ports, so nothing was
-#     shared but the CPU -- which is exactly the contention the earlier experiment lost to. It works, and
-#     on this machine it is much worse than useless:
+#   * **Parallelism across *mutants*: implemented, measured, and left off by default.** The rejection above
+#     is about splitting the tests of one mutant. This splits the mutants, each with its own workspace copy,
+#     its own bundle, its own ports. It is correct and it does not pay on this machine:
 #
-#     | slice                                        | serial | 4 workers |
+#     | slice (4 browser + 4 unit, run back to back) | serial | 4 workers |
 #     |----------------------------------------------|--------|-----------|
-#     | 5 print-profile browser mutants              |  48.1s |  1079.1s  |
-#     | 17 Vitest mutants                            |  77.2s |  1015.5s  |
+#     | mixed                                          |  111.6s |   187.7s  |
 #
-#     22x and 13x slower. Two reasons, both measured rather than guessed. The per-mutant work is small
-#     enough that the pool's fixed cost dominates: each worker copies the tree, starts a PowerShell
-#     process, and (until this was fixed) ran `tsc --noEmit` + `vite build` whether or not it had a
-#     browser mutant to serve. And four concurrent Chromium instances on four physical cores contend for
-#     the thing the browser mutants actually need.
+#     1.68x slower. Four concurrent Chromium instances plus four builds on four physical cores contend for
+#     the thing the browser mutants actually need, and unit work does not make up for it: four concurrent
+#     Vitest runs against four serial ones measured 13.66s against 16.93s, so the machine yields about
+#     **1.24x** from four-way concurrency on the cheap half of the corpus.
 #
-#     So `-Workers` defaults to **1**, the pool is kept because it is correct and would pay on a larger
-#     machine, and the honest summary is that `--max-failures=1` above is the *entire* win: **34.3 min
+#     **The first version of this note was wrong, and the way it was wrong is the useful part.** It
+#     reported 22x and 13x, from runs in which every worker sat waiting out a readiness budget against a
+#     server that had never started -- see `Start-DevServer`, where a `Start-Process` issued from inside a
+#     `Start-Job` produces a process that is alive, silent and never binds its port. So those figures
+#     measured a broken harness, not parallelism, and I attributed them to contention and wrote them down
+#     as a result. The verdict survived; the evidence did not, and had I checked the logs instead of the
+#     timings I would have found it in one run.
+#
+#     So `-Workers` defaults to **1**, the pool is kept because it is correct and would pay on a machine
+#     with cores to spare, and `--max-failures=1` above remains the *only* change that made this faster.
 #     to 15.4 min** on the full corpus, with identical results (111 of 112, same accepted survivor).
 #
 # What is **not** changed: the mutation set, the detected/undetected accounting, the
@@ -203,44 +225,80 @@ if ($WorkerIndex -ge 0) {
 }
 
 $script:timings    = @()
-$script:devServer  = $null
-$script:prodServer = $null
 $script:corpus     = @()
+
+# Every server this process started, so a single `Stop-DevServer` can tear all of them down. The serial
+# path starts at most two; the parallel path starts up to two per browser workspace.
+$script:servers    = @()
 
 function Add-Mutation([string] $label, [string] $path, [scriptblock] $apply, [string] $target) {
   $script:corpus += [pscustomobject]@{ label = $label; path = $path; apply = $apply; target = $target }
 }
 
 function Stop-DevServer {
-  if ($null -ne $script:devServer) {
-    Stop-Process -Id $script:devServer.Id -Force -ErrorAction SilentlyContinue
-    $script:devServer = $null
+  foreach ($server in $script:servers) {
+    if ($null -ne $server) {
+      Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+    }
   }
-  if ($null -ne $script:prodServer) {
-    Stop-Process -Id $script:prodServer.Id -Force -ErrorAction SilentlyContinue
-    $script:prodServer = $null
+  $script:servers = @()
+}
+
+# Waits for a server to answer, bounded by **wall-clock seconds**, and gives up immediately if the server
+# process has died.
+#
+# This was originally a *try count*, which is the wrong unit and cost a measured 830 seconds.
+#
+# Each attempt is `Start-Sleep 500ms` plus an `Invoke-WebRequest -TimeoutSec 2`. When nothing is listening
+# the connection is refused instantly, so a try costs ~0.5s -- but when the port is filtered or held by a
+# process that never answers, the probe burns its **full 2s timeout** every time. A 60-try budget is then
+# 30s in the good case and 150s in the bad one; the 360-try budget I added for workers was 180s at best and
+# **~900s at worst**. That is where the "parallelism is 22x slower" result came from: not four workers
+# contending, but one worker sitting in a wait loop against a server that had never started. The warning it
+# printed -- a single yellow line -- was the only symptom, and I read it as contention rather than as a bug.
+#
+# So: a deadline rather than a count, an early exit when the process is gone, and the captured server log
+# printed on failure. A failure that costs seconds and explains itself can be acted on; one that costs
+# fifteen minutes and says nothing cannot.
+function Wait-Ready([int] $port, [string] $what, $process) {
+  $budget = if ($WorkerIndex -ge 0) { 60 } else { 30 }
+  $clock = [System.Diagnostics.Stopwatch]::StartNew()
+  while ($clock.Elapsed.TotalSeconds -lt $budget) {
+    Start-Sleep -Milliseconds 500
+    # The common case is a server that refused to start at all -- a taken `--strictPort`, or a workspace
+    # with no `dist/`. Waiting out the budget for a process that has already exited helps nobody.
+    if ($null -ne $process -and $process.HasExited) {
+      Write-Host "WARNING: the shared $what server on $port exited immediately (code $($process.ExitCode))" -ForegroundColor Yellow
+      Show-ServerLog $port $what
+      return $false
+    }
+    try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -TimeoutSec 2 -UseBasicParsing; return $true } catch { }
+  }
+  Write-Host ("WARNING: the shared {0} server on {1} did not become ready within {2:N0}s; browser mutants will start their own" -f $what, $port, $budget) -ForegroundColor Yellow
+  Show-ServerLog $port $what
+  return $false
+}
+
+# Prints whatever the server wrote to its log. The log is per-port, so this is that server's own output and
+# cannot be interleaved with another's.
+function Show-ServerLog([int] $port, [string] $what) {
+  foreach ($stream in @('out', 'err')) {
+    $path = Server-Log $port $what $stream
+    if (Test-Path $path) {
+      $tail = @(Get-Content $path -Tail 6 -ErrorAction SilentlyContinue) -join ' | '
+      if ($tail.Trim()) { Write-Host ("  {0} on {1} said: {2}" -f $what, $port, $tail) -ForegroundColor DarkGray }
+    }
   }
 }
 
-function Wait-Ready([int] $port, [string] $what) {
-  # Wait for readiness rather than sleeping a fixed interval: a fixed sleep is either wasted time or
-  # a flaky start, and this is the one place a race would show as a mysterious "no tests found".
-  #
-  # The budget widens for a worker. `Start-DevServer` runs `tsc --noEmit` and a full `vite build` before
-  # it starts a server, and with four workers doing that at once on four physical cores the build is
-  # several times slower than it is alone -- long enough that the old 30s budget expired, the worker gave
-  # up, and Playwright then spawned its own server *per browser mutant*. That is the expensive path this
-  # whole function exists to avoid, and the warning it printed was the only symptom.
-  #
-  # The failure remains graceful (the mutant is still measured, just slower), which is why this is a
-  # budget change rather than a correctness fix.
-  $tries = if ($WorkerIndex -ge 0) { 360 } else { 60 }
-  for ($i = 0; $i -lt $tries; $i++) {
-    Start-Sleep -Milliseconds 500
-    try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -TimeoutSec 2 -UseBasicParsing; return $true } catch { }
-  }
-  Write-Host "WARNING: the shared $what server on $port did not become ready; browser mutants will start their own" -ForegroundColor Yellow
-  return $false
+# **Per-worker log paths.** These were one shared pair in `$env:TEMP` for the whole process, which was
+# correct only while one runner existed. Concurrent workers each redirect their server's stdout and stderr
+# into the *same two files*, and two processes writing one file is not something PowerShell coordinates --
+# so a worker's server could fail to launch for a reason that appeared nowhere, and the symptom was again
+# only the "did not become ready" line. Keyed on the port, which is unique per workspace.
+function Server-Log([int] $port, [string] $what, [string] $stream) {
+  $ext = if ($stream -eq 'out') { 'log' } else { 'err' }
+  return (Join-Path $env:TEMP ("p1-mutation-{0}-{1}.{2}" -f $what, $port, $ext))
 }
 
 # Builds a worker workspace: `tsc --noEmit` then `vite build`, inside that directory.
@@ -266,61 +324,99 @@ function Build-Workspace([string] $dir) {
     Set-Location -LiteralPath $saved
   }
 }
-function Start-DevServer([switch] $SkipBuild) {
-  # Two servers for the whole run, mirroring `playwright.config.ts`. `reuseExistingServer` means Playwright
-  # uses these rather than spawning its own per mutant; starting them explicitly is what turns ~20 spawns
-  # into 2.
-  if (-not (Test-Path $Vite)) { return }
+# Starts the two servers a browser mutant needs, for one root directory and one port pair.
+#
+# Two servers for the whole run, mirroring `playwright.config.ts`. `reuseExistingServer` means Playwright uses
+# these rather than spawning its own per mutant; starting them explicitly is what turns ~20 spawns into 2.
+#
+# **This is only ever called from the parent, never from a worker.** Measured: a `vite preview` launched with
+# `Start-Process` from inside a `Start-Job` comes up *alive, silent, and never binds its port* -- 0 bytes on
+# both streams, no URL line, connection refused. The identical command from the main shell answers HTTP 200
+# every time, and the workspace's `node_modules` junction is not implicated: the junction path works from
+# the shell, and the real (non-junction) path fails from inside the job.
+#
+# That single quirk is what made the pool look like a 22x pessimisation. Four workers, each waiting out a
+# readiness budget against a server that could never start, then falling back to Playwright spawning its own
+# per mutant -- the wall clock was one stall multiplied by four, and it had nothing to do with contention.
+# So the parent brings every server up front, once per workspace, and a worker only applies, runs and
+# restores. Which is also the cheaper arrangement: servers are per workspace, not per mutant.
+function Start-DevServer([string] $Root, [int] $Preview, [int] $Dev, [switch] $SkipBuild) {
+  if (-not $Root) { $Root = Split-Path $PSScriptRoot -Parent }
+  $vite = Join-Path $Root 'node_modules\vite\bin\vite.js'
+  if (-not (Test-Path $vite)) { return }
 
-  # `-SkipBuild` is for a worker whose workspace the parent has **already built**, sequentially, before any
-  # worker started. That ordering is the whole point: four workers each running `tsc --noEmit` and a full
-  # `vite build` at the same moment, on four physical cores, saturated the machine badly enough that the
-  # servers were still not up when the readiness budget expired -- and the fallback is Playwright spawning
-  # its own server per browser mutant, which is the single most expensive thing this runner avoids.
-  # Measured: five print mutants took 17.7 min through the pool that way, against ~30s each serially.
-  if ($SkipBuild) {
-    if (-not (Test-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'dist'))) {
-      Write-Host 'WARNING: -SkipBuild was given but dist/ does not exist; building after all' -ForegroundColor Yellow
+  $savedCwd     = [System.Environment]::CurrentDirectory
+  $savedPreview = $env:P1_PREVIEW_PORT
+  $savedDev     = $env:P1_DEV_PORT
+  try {
+    # `Set-Location` moves PowerShell's provider location only; a child process inherits
+    # `[Environment]::CurrentDirectory`. See `Build-Workspace` for the same trap, and `port()` in
+    # `vite.config.ts` for why the servers need the port in the environment at all.
+    [System.Environment]::CurrentDirectory = $Root
+    Set-Location -LiteralPath $Root
+    $env:P1_PREVIEW_PORT = "$Preview"
+    $env:P1_DEV_PORT     = "$Dev"
+
+    # `-SkipBuild` is for a workspace the parent has **already built**. Building here would be correct but
+    # wasteful: the parallel path builds each workspace once, sequentially, before starting any worker, so
+    # that four `tsc --noEmit` + `vite build` pairs do not run at the same moment on four physical cores.
+    if ($SkipBuild -and -not (Test-Path (Join-Path $Root 'dist'))) {
+      Write-Host "WARNING: -SkipBuild was given but $Root has no dist/; building after all" -ForegroundColor Yellow
       $SkipBuild = $false
     }
-  }
 
-  # The production server serves `dist/`, so the build has to exist and has to match the source under
-  # test. `tsc --noEmit` first because that is what `npm run build` does, and a mutant that does not
-  # compile must fail loudly here rather than be served a stale bundle.
-  if (-not $SkipBuild -and (Test-Path $Tsc)) {
-    & $Tsc --noEmit
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host 'WARNING: typecheck failed; skipping the shared production server' -ForegroundColor Yellow
+    # The production server serves `dist/`, so the build has to exist and has to match the source under
+    # test. `tsc --noEmit` first because that is what `npm run build` does, and a mutant that does not
+    # compile must fail loudly here rather than be served a stale bundle.
+    if (-not $SkipBuild) {
+      if (Test-Path $Tsc) {
+        & $Tsc --noEmit
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host 'WARNING: typecheck failed; skipping the shared production server' -ForegroundColor Yellow
+          return
+        }
+      }
+      $null = & (Join-Path $Root 'node_modules\.bin\vite.cmd') build
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host 'WARNING: the production build failed; skipping the shared production server' -ForegroundColor Yellow
+        return
+      }
+    }
+
+    # Named `$prodServer`/`$devServer` rather than `$prod`/`$dev`: this function has an `[int] $Dev`
+    # parameter, PowerShell variable names are case-insensitive, and `$dev = Start-Process ...` therefore
+    # assigned a `System.Diagnostics.Process` into a typed `[int]` and threw
+    # "Cannot convert ... to type System.Int32" at the second Start-Process. Local names that differ from
+    # a parameter only in case are a trap worth avoiding by construction.
+    $prodServer = Start-Process -FilePath 'node.exe' `
+      -ArgumentList $vite, 'preview', '--host', '127.0.0.1', '--port', "$Preview", '--strictPort' `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput (Server-Log $Preview 'preview' 'out') `
+      -RedirectStandardError  (Server-Log $Preview 'preview' 'err')
+    $script:servers += , $prodServer
+    if (-not (Wait-Ready $Preview 'production' $prodServer)) {
+      Stop-Process -Id $prodServer.Id -Force -ErrorAction SilentlyContinue
       return
     }
-  }
-  if (-not $SkipBuild) {
-    $null = & $ViteBuild 'build'
-    if ($LASTEXITCODE -ne 0) {
-      Write-Host 'WARNING: the production build failed; skipping the shared production server' -ForegroundColor Yellow
-      return
+
+    # The dev server only answers the proxied `/spike.html`; see `vite.config.ts` for the proxy. If it
+    # will not start that costs the spike spec, not the mutants -- so this warns and carries on rather than
+    # tearing down a working production server. The previous code called `Stop-DevServer` here, which would
+    # have thrown away the good server over the optional one.
+    $devServer = Start-Process -FilePath 'node.exe' `
+      -ArgumentList $vite, '--host', '127.0.0.1', '--port', "$Dev", '--strictPort' `
+      -PassThru -WindowStyle Hidden `
+      -RedirectStandardOutput (Server-Log $Preview 'dev' 'out') `
+      -RedirectStandardError  (Server-Log $Preview 'dev' 'err')
+    $script:servers += , $devServer
+    if (-not (Wait-Ready $Dev 'dev' $devServer)) {
+      Stop-Process -Id $devServer.Id -Force -ErrorAction SilentlyContinue
     }
-  }
-
-  $script:prodServer = Start-Process -FilePath 'node.exe' `
-    -ArgumentList $Vite, 'preview', '--host', '127.0.0.1', '--port', "$PreviewPort", '--strictPort' `
-    -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $env:TEMP 'p1-mutation-preview.log') `
-    -RedirectStandardError  (Join-Path $env:TEMP 'p1-mutation-preview.err')
-  if (-not (Wait-Ready $PreviewPort 'production')) {
-    Stop-Process -Id $script:prodServer.Id -Force -ErrorAction SilentlyContinue
-    $script:prodServer = $null
-    return
-  }
-
-  $script:devServer = Start-Process -FilePath 'node.exe' `
-    -ArgumentList $Vite, '--host', '127.0.0.1', '--port', "$DevPort", '--strictPort' `
-    -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $env:TEMP 'p1-mutation-vite.log') `
-    -RedirectStandardError  (Join-Path $env:TEMP 'p1-mutation-vite.err')
-  if (-not (Wait-Ready $DevPort 'dev')) {
-    Stop-DevServer
+  } finally {
+    [System.Environment]::CurrentDirectory = $savedCwd
+    Set-Location -LiteralPath $savedCwd
+    $env:P1_PREVIEW_PORT = $savedPreview
+    $env:P1_DEV_PORT     = $savedDev
   }
 }
 
@@ -579,8 +675,21 @@ if ($WorkerIndex -ge 0) {
   $indices = @($WorkerIndices | ForEach-Object { [int] $_ })
   $mine = @($indices | ForEach-Object { $selected[$_] })
 
-  $needServers = (-not $NoBrowser) -and (@($mine | Where-Object { Is-Browser $_.target }).Count -gt 0)
-  if ($needServers) { Start-DevServer -SkipBuild }
+  # **No server is started from in here.** The parent brought this workspace's servers up before launching
+  # any worker, because `Start-Process` inside a `Start-Job` yields a process that is alive, silent and never
+  # listening -- see `Start-DevServer` for the measurement.
+  #
+  # Asserted rather than assumed, and that distinction matters: a worker with no server does not produce a
+  # wrong verdict, it produces a *correct* one ~150s per mutant later, because Playwright quietly starts its
+  # own. So the only symptom of getting this wrong is a mysteriously slow run -- exactly the kind of thing
+  # that gets misread as "parallelism doesn't scale here".
+  if ((-not $NoBrowser) -and (@($mine | Where-Object { Is-Browser $_.target }).Count -gt 0)) {
+    $served = $false
+    try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:$PreviewPort" -TimeoutSec 5 -UseBasicParsing; $served = $true } catch { }
+    if (-not $served) {
+      throw "worker $WorkerIndex has browser mutants but nothing is serving port $PreviewPort; the parent must start it"
+    }
+  }
 
   $records = @()
   try {
@@ -598,6 +707,7 @@ if ($WorkerIndex -ge 0) {
       $records | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ResultsFile -Encoding utf8
     }
   } finally {
+    # Nothing to stop: the servers belong to the parent, which tears them down after `Wait-Job`.
     Stop-DevServer
   }
   exit 0
@@ -619,14 +729,27 @@ if ($Workers -gt 1) {
       $indices = @(for ($k = 0; $k -lt $slices[$w].Count; $k++) { [array]::IndexOf($selected, $slices[$w][$k]) })
       if ($indices.Count -eq 0) { continue }
       $space = New-WorkerWorkspace $w $script:WorkerRoot
+      $hasBrowser = (@($slices[$w] | Where-Object { Is-Browser $_.target }).Count -gt 0)
 
-      # Build this workspace **now, sequentially**, and **only if this worker has a browser mutant to
-      # run**. Building unconditionally was measured and it is pure waste: a worker holding only Vitest
-      # mutants never serves `dist/`, so its `tsc --noEmit` + `vite build` -- roughly 11s, times
-      # every worker -- buys nothing at all.
-      if (@($slices[$w] | Where-Object { Is-Browser $_.target }).Count -gt 0) {
+      # **Build and serve this workspace from here, in the parent, before any worker starts.** Both halves of
+      # that sentence are load-bearing.
+      #
+      # Sequentially, because four simultaneous `tsc --noEmit` + `vite build` pairs on four physical cores
+      # oversubscribe the machine -- and only for workspaces that actually have a browser mutant, since a
+      # worker holding only Vitest mutants never serves `dist/` and its build would buy nothing.
+      #
+      # From the parent, because a `Start-Process` inside a `Start-Job` produces a server that is alive,
+      # silent and never binds its port. That is not a performance note: it is the entire reason this pool
+      # once looked like a 22x pessimisation, and it cost a committed "measured and rejected" note that was
+      # really a measurement of a broken harness.
+      if ($hasBrowser -and -not $NoBrowser) {
+        # Same stride the worker computes for itself, so the two cannot disagree about which port this
+        # workspace owns. Asserted by the worker's own probe before it runs a browser mutant.
+        $spacePreviewPort = $PortBase + (2 * $w)
         if (-not (Build-Workspace $space)) {
-          Write-Host 'WARNING: a workspace failed to build; its browser mutants will start their own server' -ForegroundColor Yellow
+          Write-Host "WARNING: workspace $space failed to build; its browser mutants will start their own server" -ForegroundColor Yellow
+        } else {
+          Start-DevServer -Root $space -Preview $spacePreviewPort -Dev ($spacePreviewPort + 1) -SkipBuild
         }
       }
       $results = Join-Path $script:WorkerRoot ("w{0}.json" -f $w)
@@ -691,6 +814,11 @@ if ($Workers -gt 1) {
       Write-Host ("{0} {1}" -f $(if ($rec.detected) { 'detected  ' } else { 'NOT FOUND ' }), $m.label)
     }
   } finally {
+    # The workspace servers are the parent's, so the parent stops them. Before this they leaked: nothing
+    # owned them, so every pool run left live `vite preview` processes holding the worker ports, and the
+    # *next* run's `--strictPort` servers then failed to bind for a reason that had nothing to do with the
+    # code under test.
+    Stop-DevServer
     foreach ($job in $jobs) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
     Remove-Item $script:WorkerRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -713,8 +841,7 @@ if ($Workers -gt 1) {
 }
 
 if (-not $NoBrowser -and @($selected | Where-Object { Is-Browser $_.target }).Count -gt 0) {
-
-  Start-DevServer
+  Start-DevServer -Root (Split-Path $PSScriptRoot -Parent) -Preview $PreviewPort -Dev $DevPort
 }
 
 $total = [System.Diagnostics.Stopwatch]::StartNew()
