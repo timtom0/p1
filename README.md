@@ -529,6 +529,19 @@ back — and the existing test asserted only that the inspector went *mixed*, wh
 satisfies. The M8 test asserts the whole delta, and a mutation of the fix is what keeps it
 fixed.
 
+**On running it: ~16 minutes, and why not faster.** The corpus is 36 browser mutants and 76 unit, and
+the browser ones used to cost 30-85s each — so a full run was ~34 minutes. The single change that fixed
+it was `--max-failures=1` on browser targets: the only question asked of a suite is "did it fail?", and
+for a detected mutant that is settled by the first failing test, so running the rest cannot change the
+answer. Browser mutants went from 30-85s to 3-16s and the whole corpus to **15.9 min**, with identical
+results.
+
+Parallelism across *mutants* was implemented and then measured, and it is **off by default** because on
+an ordinary 4-core machine it is much worse than useless: a 5-mutant browser slice went from 48s serial
+to 1079s across 4 workers, and 17 unit mutants from 77s to 1016s. It is kept behind `-Workers` because
+it is correct and would pay on a larger machine, but the honest summary is that one flag is the entire
+win. The measurement is recorded next to the code.
+
 The implementation notes behind all of this are in
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) — the
 [M0](docs/ARCHITECTURE.md#m0-implementation-notes),

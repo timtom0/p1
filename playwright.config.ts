@@ -17,14 +17,39 @@ import { defineConfig, devices } from '@playwright/test';
  *     viewport's own zoom never enter the comparison
  */
 
-const PORT = 5174;
+/**
+ * The ports this run's servers listen on.
+ *
+ * Overridable by environment variable so the mutation runner can give each of its parallel workers its
+ * own pair — two `--strictPort` servers cannot share a port, and each worker builds and serves its own
+ * bundle because a mutant is a file edit. Defaults are the values every ordinary caller uses, so `npm
+ * run test:visual` is unaffected and cannot tell the difference. See `vite.config.ts` for the same pair
+ * read from the same variables.
+ */
+const PORT = envPort('P1_PREVIEW_PORT', 5174);
 
 /**
  * The dev server's port. Only `/spike.html` and the raw-TypeScript graph it
  * imports are served from here; see `vite.config.ts` for the proxy that makes
  * that reachable through `PORT`.
  */
-const DEV_PORT = 5175;
+const DEV_PORT = envPort('P1_DEV_PORT', 5175);
+
+/**
+ * A port number from the environment, validated here rather than trusted.
+ *
+ * A malformed value that silently became `NaN` would surface much later as an opaque connection
+ * failure, from inside whichever worker happened to be running — so it is rejected at config load.
+ */
+function envPort(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${name} must be a port number between 1 and 65535, got "${raw}"`);
+  }
+  return value;
+}
 
 /**
  * Browser viewport for the visual suite.

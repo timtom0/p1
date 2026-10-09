@@ -7,9 +7,30 @@ import { defineConfig } from 'vitest/config';
  * The preview port is the suite's `baseURL`, because the overwhelming majority
  * of tests address the application at `/` and must get the built bundle. The dev
  * port is separate so the two lifecycles cannot collide on `--strictPort`.
+ *
+ * **Overridable by environment variable, for one reason only.** The mutation
+ * runner (M19) gives each parallel worker its own copy of the tree, and two
+ * workers cannot share a `--strictPort` server. `P1_PREVIEW_PORT` and
+ * `P1_DEV_PORT` let a worker take a distinct pair; the defaults are the values
+ * every other caller — dev, build, the browser suite — already uses, so nothing
+ * else in the project can tell the difference.
+ *
+ * Read as a number at module scope rather than inside a function so a malformed
+ * value fails once, loudly, instead of producing `5174NaN` and a confusing port
+ * error much later.
  */
-const PREVIEW_PORT = 5174;
-const DEV_PORT = 5175;
+function port(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${name} must be a port number between 1 and 65535, got "${raw}"`);
+  }
+  return value;
+}
+
+const PREVIEW_PORT = port('P1_PREVIEW_PORT', 5174);
+const DEV_PORT = port('P1_DEV_PORT', 5175);
 
 export default defineConfig({
   server: { port: 5173 },
