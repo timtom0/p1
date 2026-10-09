@@ -437,6 +437,34 @@ describe('simultaneous X and Y snapping', () => {
 // No self-snap
 // ---------------------------------------------------------------------------
 
+describe('invisible objects are not snap targets', () => {
+  // Snapping resolves its targets through `arrangeTargets`, so M18's visibility rule reaches here for
+  // free. It matters more for snapping than for alignment, because a snap *draws a guide*: before the fix,
+  // dragging an object near an invisible one snapped to it and drew a line pointing at nothing.
+  const hidden = (id: string, x: number, y: number, w: number, h: number): ShapeNode => ({
+    ...rect(id, x, y, w, h),
+    visible: false,
+  });
+
+  it('excludes a hidden sibling', () => {
+    const doc = docOf([rect('moving', 60, 60, 40, 40), hidden('ghost', 400, 250, 60, 50)]);
+    expect(snapTargetsFor(doc, ['moving']).map((t) => t.id)).toEqual([]);
+  });
+
+  it('excludes a hidden group, and does not offer its visible children either', () => {
+    const doc = docOf([
+      rect('moving', 60, 60, 40, 40),
+      { ...group('gone', 300, 300, [rect('c', 10, 10, 40, 40)]), visible: false },
+    ]);
+    expect(snapTargetsFor(doc, ['moving']).map((t) => t.id)).toEqual([]);
+  });
+
+  it('still offers everything visible, so the rule is not over-eager', () => {
+    const doc = docOf([rect('moving', 60, 60, 40, 40), rect('shown', 400, 250, 60, 50)]);
+    expect(snapTargetsFor(doc, ['moving']).map((t) => t.id)).toEqual(['shown']);
+  });
+});
+
 describe('self-snap', () => {
   it('excludes the moving selection, so an object cannot snap to itself', () => {
     const doc = docOf([rect('moving', 100, 100, 40, 40), rect('other', 300, 300, 50, 50)]);

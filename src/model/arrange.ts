@@ -174,10 +174,39 @@ function boxFor(
   const rects = leaves
     .filter((candidate) => candidate.ancestors.some((group) => group.id === id))
     .map((candidate) => paintedBounds(candidate.transform));
-  // A group with no placed descendants has no painted extent -- an empty group, or one whose children
-  // are all invisible. Returning null rather than a zero-sized box keeps it out of the union instead of
-  // collapsing the result to a point.
+  // A group with no **visible** descendant has no painted extent. Three cases reach it, and because
+  // `leaves` arrives already filtered to effectively-visible placements they all fall out of one
+  // `length === 0`: an empty group; a group whose children are all invisible; and a group that is itself
+  // hidden -- which hides its subtree, so even its visible children contribute nothing.
+  //
+  // Returning null rather than a zero-sized box keeps it out of the union instead of collapsing the
+  // result to a point.
   return rects.length === 0 ? null : unionRects(rects);
+}
+
+/**
+ * Whether a placement contributes to painted geometry at all.
+ *
+ * **The rule the renderer and hit testing already share, and the one ADR 0012 A10 records:** the node must
+ * be `visible`, and so must every ancestor group. A hidden group hides its subtree -- that is the one thing
+ * a group does that a leaf cannot -- so a node beneath one paints nothing and is not on the page.
+ *
+ * `placementsInDocument` deliberately does **not** apply this, and should not: a placement says where a
+ * thing is, which does not require it to be on the page. That is why the filter lives here, in the code that
+ * is about what the page shows.
+ *
+ * ## Why this has to agree with the other two
+ *
+ * `editor/document-view.ts` propagates `visible: false` down a hidden group's subtree, and
+ * `isEffectivelyVisible` in `editor/selection.ts` refuses to hit-test one. Those two agree; this function
+ * existed to make them agree. Arrangement was the third reader, and it applied no visibility rule at all --
+ * so a hidden object still contributed its box, and because a group's box is the union of its descendants',
+ * one invisible member could stretch a union arbitrarily far. Aligning or snapping to geometry that is not
+ * on the page is the "invisible but live" state the renderer comment calls haunting.
+ */
+function isEffectivelyVisible(placement: NodePlacement): boolean {
+  if (!placement.node.visible) return false;
+  return placement.ancestors.every((ancestor) => ancestor.visible);
 }
 
 /**
@@ -200,7 +229,13 @@ export function arrangeTargets(
   const wanted = new Set(ids);
   // Leaves, for the group union. Groups are not in here: `placementsInDocument` yields leaves only, so a
   // group has to be located with `locateNode`, which reaches both.
-  const leaves = placementsInDocument(doc);
+  //
+  // **Filtered to what actually paints.** Every box below is the box of something the user can see, because
+  // alignment asks "line these up as I see them" and distribution asks where the gaps look. An invisible
+  // object is neither on the page nor selectable (`selection.ts` refuses it), so letting it contribute
+  // would align against geometry that is not there -- and, through a group's union, one hidden member at
+  // (5000, 5000) would stretch a 60x40 union to 5010x5010.
+  const leaves = placementsInDocument(doc).filter(isEffectivelyVisible);
   const targets: ArrangeTarget[] = [];
   const emitted = new Set<string>();
 
@@ -238,19 +273,19 @@ export function arrangeTargets(
     }
   }
 
-  // A wanted group with no placed descendants -- empty, or every child invisible -- is still located, so
-  // that it is reported rather than silently absent. It contributes no target, because it has no box.
+  // A wanted group with no visible descendants -- empty, every child invisible, or hidden itself -- is still
+  // located, so that it is reported rather than silently absent. It contributes no target, because
+  // `boxFor` gives it no box.
+  //
+  // **Only a group can reach here.** Every effectively-visible leaf was emitted by the loop above, so a leaf
+  // that arrives is one that was filtered out as invisible and has no place on the page. Letting one
+  // through would also hand `emit` the authored parent-local transform where `leafWorld` expects a
+  // page-space one -- a wrong box rather than a missing one.
   for (const id of wanted) {
     if (emitted.has(id)) continue;
     const location = locateNode(doc, id);
-    if (location === null) continue;
-    emit(
-      location.node.id,
-      location.node.type === 'group',
-      location.node.transform,
-      location.ancestors,
-      location.node.transform,
-    );
+    if (location === null || location.node.type !== 'group') continue;
+    emit(location.node.id, true, location.node.transform, location.ancestors, location.node.transform);
   }
 
   return targets;

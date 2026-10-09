@@ -32,7 +32,7 @@
 #
 # A mutation that no test can kill is either a coverage gap or an equivalent mutant, and the two deserve
 # opposite responses: a gap should be closed, an equivalent mutant should be recorded and never counted
-# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 96 undetected"
+# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 99 undetected"
 # is a decision rather than an oversight -- and so that the next milestone inherits a known quantity instead
 # of rediscovering it.
 #
@@ -688,3 +688,42 @@ Add-Mutation 'a cancelled drag leaves its guide on the canvas' `
   'src\editor\editor.ts' `
   { param($t) [regex]::Replace($t, '    this\.snapLines = \[\];', '', 2) } `
   'tests/editor/snap.spec.ts'
+# --- M18 -- visibility in arrangement bounds ------------------------------------------------
+#
+# `arrangeTargets` answers "line these up as I see them", so a box for something that is not on the page is
+# a wrong answer rather than a conservative one. These four cover the effective-visibility rule and the two
+# places it is applied, so a regression cannot pass by accident through either the leaf check or the group
+# union.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'a hidden object still contributes its box to an arrangement target' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  if (!placement.node.visible) return false;', '  if (false) return false;') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'the ancestor chain is ignored, so a hidden group no longer hides its subtree' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  return placement.ancestors.every((ancestor) => ancestor.visible);', '  return true;') } `
+  'src/model/arrange.test.ts'
+
+Add-Mutation 'arrangement targets are resolved without filtering on visibility at all' `
+  'src\model\arrange.ts' `
+  { param($t) $t.Replace('  const leaves = placementsInDocument(doc).filter(isEffectivelyVisible);', '  const leaves = placementsInDocument(doc);') } `
+  'src/model/arrange.test.ts'
+
+# NOT a mutant: dropping the `location.node.type !== 'group'` guard is an **equivalent** change, so the
+# corpus should not carry something that cannot fail. The guard and the `emit` call are redundant with each
+# other by construction:
+#
+#   if (location === null || location.node.type !== 'group') continue;
+#   emit(location.node.id, true, ...);            <-- isGroup is a literal `true`
+#
+# `isGroup` is hardcoded, so a leaf that slips past the guard is resolved as a **group**, and a group has no
+# box unless a visible leaf lists it as an ancestor. There is none, so `boxFor` returns null and `emit`
+# declines -- the same outcome the guard produced. Verified by measurement: with the guard removed,
+# `arrangeTargets(doc, ['a', 'hid'])` still returns `['a']` for a hidden `hid`.
+#
+# The guard is kept anyway, because it states the invariant at the point where a future edit would break it.
+# The failure it prevents is not the dropped box -- `isGroup: true` already gives that -- but the *wrong*
+# box: restoring `location.node.type === 'group'` would hand `emit` the authored parent-local transform where
+# `leafWorld` expects a page-space one.

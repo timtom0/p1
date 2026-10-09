@@ -229,10 +229,9 @@ describe('arrangeTargets', () => {
   });
 
   it('drops a wanted group that has nothing painted in it', () => {
-    // The case `arrange.ts` reaches through its second loop: a wanted group with no *placed* descendants is
-    // still located and emitted, and it is `emit` that declines to give it a box. Giving it a zero box
-    // instead would drag every union and alignment to the origin, so this is a behaviour worth pinning
-    // rather than an incidental branch.
+    // A wanted group with no *visible* descendant is still located and emitted, and it is `emit` that
+    // declines to give it a box. Giving it a zero box instead would drag every union and alignment to the
+    // origin, so this is a behaviour worth pinning rather than an incidental branch.
     const withEmptyGroup = docOf([rect('a', 40, 40, 60, 40), group('hollow', 300, 300, [])]);
 
     expect(arrangeTargets(withEmptyGroup, ['a', 'hollow']).map((t) => t.id)).toEqual(['a']);
@@ -240,23 +239,97 @@ describe('arrangeTargets', () => {
     const bounds = arrangeBounds(arrangeTargets(withEmptyGroup, ['a', 'hollow']))!;
     expect(bounds.x).toBeCloseTo(40, 6);
     expect(bounds.y).toBeCloseTo(40, 6);
-
-    // The trigger is "no **placed** descendant", not "nothing visible". `placementsInDocument` does not
-    // filter on `visible`, so a group whose only child is invisible still has a placed descendant and keeps
-    // its box. `boxFor`'s comment ("an empty group, or one whose children are all invisible", arrange.ts
-    // line 177) reads as though invisibility also drops it; measurement says otherwise, and the comment is
-    // left alone because M16 is closed. Asserted here as measured, and flagged rather than reconciled.
-    const invisibleChild = { ...rect('ghost', 10, 10, 40, 40), visible: false };
-    const withInvisibleChild = docOf([rect('a', 40, 40, 60, 40), group('dim', 300, 300, [invisibleChild])]);
-    expect(
-      arrangeTargets(withInvisibleChild, ['a', 'dim']).map((t) => t.id),
-      'invisible is a rendering concern; the child is still placed, so the group still has a box',
-    ).toEqual(['a', 'dim']);
   });
 
   it('is deterministic: document order, not selection order', () => {
     expect(arrangeTargets(SIZED, ['c', 'a', 'b']).map((t) => t.id)).toEqual(['a', 'b', 'c']);
     expect(arrangeTargets(SIZED, ['b', 'c', 'a']).map((t) => t.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Visibility
+//
+// `visible: false` is not a rendering detail as far as arrangement is concerned. It means the object is not
+// on the page: the renderer hides it (`document-view.ts`), hit testing refuses it (`selection.ts`), and a
+// hidden group hides its whole subtree (ADR 0012 A10). Alignment asks "line these up *as I see them*", so a
+// box for something nobody can see is not a conservative answer -- it is a wrong one.
+//
+// Every case below failed before M18, in a different way each time, which is why each is its own assertion.
+// ---------------------------------------------------------------------------
+
+describe('visibility', () => {
+  const hidden = (id: string, x: number, y: number, w: number, h: number): ShapeNode => ({
+    ...rect(id, x, y, w, h),
+    visible: false,
+  });
+  // `group()` takes rotation and scale but not `visible`, so a hidden group is spelled by override --
+  // which also keeps the intent obvious at the call site.
+  const hiddenGroup = (id: string, children: Node[]): GroupNode => ({
+    ...group(id, 300, 300, children),
+    visible: false,
+  });
+
+  it('does not offer an invisible leaf, even when the selection names it', () => {
+    const doc = docOf([rect('a', 40, 40, 60, 40), hidden('hid', 400, 300, 50, 50)]);
+    // A user cannot select this -- `selection.ts` refuses it -- so the only way it arrives is a caller
+    // naming it. It must not become a target.
+    expect(arrangeTargets(doc, ['a', 'hid']).map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('does not offer a visible group whose children are all invisible', () => {
+    const doc = docOf([rect('a', 40, 40, 60, 40), group('dim', 300, 300, [hidden('c', 10, 10, 40, 40)])]);
+    expect(arrangeTargets(doc, ['a', 'dim']).map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('does not offer a hidden group, and its visible children do not rescue it', () => {
+    // The subtree case, and the one a leaf-only filter would miss: the children *are* visible, but the
+    // group is not, and a hidden group hides its subtree. The renderer paints nothing here.
+    const doc = docOf([rect('a', 40, 40, 60, 40), hiddenGroup('gone', [rect('c', 10, 10, 40, 40)])]);
+    expect(arrangeTargets(doc, ['a', 'gone']).map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('does not offer a visible group whose only descendant is inside a hidden group', () => {
+    // Nested, because the ancestor chain has to be walked rather than the parent checked: `deep` is
+    // visible, `inner` is not, and `outer` is. `outer` has no visible descendant and so has no box.
+    const doc = docOf([
+      rect('a', 40, 40, 60, 40),
+      group('outer', 300, 300, [hiddenGroup('inner', [rect('deep', 0, 0, 40, 40)])]),
+    ]);
+    expect(arrangeTargets(doc, ['a', 'outer']).map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('keeps only the visible descendants in a group that has a mix', () => {
+    // The surviving behaviour: a group is still the union of its descendants' bounds, just not of the
+    // ones that are not painted.
+    const doc = docOf([
+      rect('a', 40, 40, 60, 40),
+      group('mixed', 0, 0, [rect('shown', 100, 100, 50, 50), hidden('unseen', 900, 900, 50, 50)]),
+    ]);
+    const mixed = arrangeTargets(doc, ['mixed'])[0]!;
+    expect(mixed.painted.x).toBeCloseTo(100, 6);
+    expect(mixed.painted.width, 'the hidden child must not stretch the union').toBeCloseTo(50, 6);
+  });
+
+  it('does not let one invisible member stretch a union', () => {
+    // The concrete damage, and the reason this is not a cosmetic rule: before M18 this union was
+    // 5010 x 5010 instead of 60 x 40.
+    const doc = docOf([rect('a', 40, 40, 60, 40), hidden('far', 5000, 5000, 50, 50)]);
+    const bounds = arrangeBounds(arrangeTargets(doc, ['a', 'far']))!;
+    expect(bounds.width).toBeCloseTo(60, 6);
+    expect(bounds.height).toBeCloseTo(40, 6);
+  });
+
+  it('leaves a fully visible selection exactly as it was', () => {
+    // The guard against the fix being over-eager: alignment of ordinary visible objects is untouched,
+    // including a nested one.
+    const doc = docOf([
+      rect('a', 40, 40, 60, 40),
+      group('g', 300, 200, [rect('child', 10, 10, 50, 50)]),
+    ]);
+    expect(arrangeTargets(doc, ['a', 'g']).map((t) => t.id)).toEqual(['a', 'g']);
+    const g = arrangeTargets(doc, ['g'])[0]!;
+    expect(g.painted.width).toBeCloseTo(50, 6);
   });
 });
 
