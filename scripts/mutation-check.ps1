@@ -139,12 +139,17 @@ $ErrorActionPreference = 'Continue'
 #     * **Thread oversubscription.** Vitest sizes its pool from `os.cpus()`, so four processes
 #       oversubscribe. Constraining each to one thread was slower still (17.46s against 13.66s).
 #
-#     What is left in the 17.5 minutes, per browser mutant: a **~2.2s build** and a **~3.2s Playwright
-#     invocation floor** (config load, browser launch, teardown), the remainder being tests. The build is the
-#     mechanism, not overhead - the browser suite is served `dist/`, so a mutation reaches it only through a
-#     rebuild (M15, F17) - and the floor would need a browser held open across mutants, which Playwright's
-#     runner does not expose for a bundle that changes between runs. So roughly 3 minutes of the 17.5 are
-#     structural and the rest is test execution that has to happen.
+#     **What did work was not scheduling. It was doing less work per mutant** -- see `Invoke-Target` for
+#     narrowed replay, which runs only the test that catches each mutation. Measured per spec against the
+#     whole file: 4.5x on print, 6.4x on snap, 9.9x on layers, 7.7x on selection, 6.7x aggregate. Over the
+#     full corpus that is **19.8 min cold (learning the claims) to 11.7 min warm**, with 35 of 36 browser
+#     mutants on the fast path and the verdict unchanged at 111 of 112.
+#
+#     What remains per browser mutant is a ~2.2s build and a ~3.2s invocation floor -- about 3.5 of the 11.7
+#     minutes. The build cannot be dropped: the browser suite is served `dist/`, so that build *is* the
+#     mechanism by which a mutation reaches a test (M15, F17). The floor would need a browser held open
+#     across mutants, which Playwright's runner does not expose for a bundle that changes between runs, so
+#     removing it means driving a browser directly rather than through the runner.
 #
 #     **The 22x and 13x figures an earlier version of this note reported were a broken harness, not a
 #     property of parallelism.** They came from runs where every worker waited out a readiness budget
@@ -153,9 +158,8 @@ $ErrorActionPreference = 'Continue'
 #     right; the evidence was not, and it should have been read off the server logs rather than inferred
 #     from timings.
 #
-#     So `-Workers` defaults to **1**, the pool is kept because it is correct and would pay on a machine
-#     with cores to spare, and `--max-failures=1` above remains the *only* change that made this faster.
-#     to 15.4 min** on the full corpus, with identical results (111 of 112, same accepted survivor).
+#     So `-Workers` defaults to **1**, and the pool is kept because it is correct and would pay on a
+#     machine with cores to spare.
 #
 # What is **not** changed: the mutation set, the detected/undetected accounting, the
 # "site not found is an error" rule, and the fact that every mutation is reverted whether it passed or
@@ -579,7 +583,7 @@ function Invoke-Target([string] $target, [string] $label) {
     #     | persistence.spec.ts |  90.3s |  13.5s |  6.7x |
     #     | aggregate           | 430s   |   64s  |  6.7x |
     #
-    # Over the full corpus this took **19.2 min to 13.7 min**, with 35 of 36 browser mutants running a
+    # Over the full corpus this took **19.8 min cold to 11.7 min warm**, with 35 of 36 browser mutants running a
     # single cached test and the verdict unchanged at 111 of 112.
     #
     # **This is a fast path, never a substitute.** A cached claim can only ever *prove* a detection: if

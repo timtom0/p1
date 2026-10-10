@@ -531,10 +531,27 @@ back — and the existing test asserted only that the inspector went *mixed*, wh
 satisfies. The M8 test asserts the whole delta, and a mutation of the fix is what keeps it
 fixed.
 
-**On running it: ~16-25 minutes, and why not faster.** The corpus is 36 browser mutants and 76 unit. The
-one change that halved it was `--max-failures=1` on browser targets: the only question asked of a suite is
-"did it fail?", and for a detected mutant that is settled by the first failing test, so running the rest
-cannot change the answer. Browser mutants went from 30-85s to 3-16s each.
+**On running it: ~12 minutes warm, ~20 the first time.** The corpus is 36 browser mutants and 76 unit, and
+the browser half is 72% of the cost. Two changes brought it down from ~34 minutes:
+
+1. **`--max-failures=1`** on browser targets. The only question asked of a suite is "did it fail?", and for
+   a detected mutant that is settled by the first failing test, so running the rest cannot change the
+   answer.
+2. **Narrowed replay.** That flag still *walks* every test up to the failure, and the specs are large — 18
+   tests in print, 39 in layers, 40 in selection. Running only the test that catches the mutation is
+   **6.7x** cheaper across those six specs, and it took the full corpus from **19.8 min to 11.7 min**, with
+   35 of 36 browser mutants on the fast path.
+
+Narrowing cannot weaken the guarantee, which is why it is safe to enable by default. A cached claim — the
+title of the test that caught a given mutant, discovered from real runs — is a *sufficient* condition for
+"this suite fails", never a necessary one. So it can only ever **prove** a detection; a stale claim, a
+renamed test, or a test that no longer fails all fall back to the full run and the original semantics
+decide. No run can report a survivor because of narrowing. Both directions were verified: the accepted
+survivor still reports NOT FOUND and exits 1, and a claim poisoned to point at a passing test fell back and
+still reported correctly.
+
+The claims live in a gitignored `scripts/mutation-claims.json` rather than in the corpus, which is
+hand-curated prose whose value is that a human wrote every label. Deleting the cache costs one slow run.
 
 Parallelism across *mutants* is implemented and **off by default**, because on this machine it does not
 pay at any width. Running the *same* work N ways at once:
@@ -555,11 +572,12 @@ That also settles the obvious scheduling idea, cheap-and-high-yield-first. It is
 does not apply here: **a mutation check has no early exit**, so all 112 verdicts are required whatever the
 order. Ordering only pays by feeding a parallel scheduler, and the scheduler has nothing to give.
 
-Of the 17.5 minutes the browser half takes, roughly 3 are structural per-mutant overhead — a ~2.2s build
-and a ~3.2s Playwright invocation floor. The build cannot be dropped, since the browser suite is served
-`dist/` and that build *is* the mechanism by which a source mutation reaches a test; the floor would need a
-browser held open across mutants, which Playwright's runner does not expose for a bundle that changes
-between runs. The rest is test execution that has to happen.
+Of the 11.7 minutes, roughly 3.5 is now structural per-mutant overhead on the browser half — a ~2.2s build
+and a ~3.2s Playwright invocation floor, 36 times over. The build cannot be dropped, since the browser suite
+is served `dist/` and that build *is* the mechanism by which a source mutation reaches a test; the floor
+would need a browser held open across mutants, which Playwright's runner does not expose for a bundle that
+changes between runs. Removing it would mean driving a browser directly instead of through the runner — a
+rewrite of the harness rather than a tuning of it.
 
 Two further ideas were measured and rejected: `--bail=1` for the unit half (the analogue of the flag above)
 is **2.3x slower**, and a single end-to-end serial-vs-parallel comparison is not a sufficient measurement —
