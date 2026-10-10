@@ -4,6 +4,10 @@ param(
   [switch] $NoBrowser,
   [switch] $CheckSites,
 
+  # Selects by the suite a mutation is measured against, rather than by its label. See the note at the
+  # selection site for why a milestone needs this and `-Filter` does not reach it.
+  [string] $Target = '',
+
   # Parallel workers. Each gets its own copy of the tree and its own pair of ports, because a
   # mutation is a *file edit*: two workers sharing a workspace would corrupt each other, and two
   # workers sharing a --strictPort server would collide. Default 1, which is the serial path
@@ -216,20 +220,72 @@ function Restore-AfterCrash {
     return
   }
   Write-Host 'A previous mutation run did not finish. Restoring the files it had modified:' -ForegroundColor Yellow
+
+  # A restore that partly fails must stop the run, not continue past it.
+  #
+  # `Copy-Item` without `-ErrorAction Stop` is non-terminating: it prints a red error, sets `$?` false,
+  # and the loop carries on to the next file. The run then proceeds to mutate and test a tree that is
+  # still holding a killed mutant -- which is precisely the state this function exists to undo. Every
+  # verdict it went on to produce would be measuring a tree nobody wrote. Found by holding one backup
+  # file open on purpose and watching the restore carry straight past its own failure.
+  $failed = @()
   foreach ($file in $files) {
     # `$file.Name`, not `$file.BaseName`: BaseName strips the extension, so `src__model__tree.ts`
     # restored to a path with no extension and the restore silently did nothing -- found by
     # testing the recovery rather than assuming it worked.
     $relative = $file.Name -replace '__', '/'
     $target = Join-Path (Split-Path $PSScriptRoot -Parent) ($relative -replace '/', '\')
-    if (Test-Path $target) {
-      Copy-Item -LiteralPath $file.FullName -Destination $target -Force
-      Write-Host ("  restored  {0}" -f $relative) -ForegroundColor Yellow
-    } else {
+    if (-not (Test-Path $target)) {
       Write-Host ("  MISSING   {0} -- the file it belonged to no longer exists" -f $relative) -ForegroundColor Red
+      $failed += $relative
+      continue
+    }
+    try {
+      Copy-Item -LiteralPath $file.FullName -Destination $target -Force -ErrorAction Stop
+      Write-Host ("  restored  {0}" -f $relative) -ForegroundColor Yellow
+    } catch {
+      Write-Host ("  FAILED    {0} -- {1}" -f $relative, $_.Exception.Message) -ForegroundColor Red
+      $failed += $relative
     }
   }
-  Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue
+
+  if ($failed.Count -gt 0) {
+    # Deliberately *before* the cleanup below: the backup directory is the only remaining copy of the
+    # clean content, so throwing it away here would destroy the means of fixing this by hand.
+    Write-Host '' -ForegroundColor Red
+    Write-Host ("{0} of {1} file(s) could not be restored. Stopping, because a mutation run needs a" -f $failed.Count, $files.Count) -ForegroundColor Red
+    Write-Host 'known-clean tree to mutate -- running one now would report verdicts against a file that' -ForegroundColor Red
+    Write-Host 'still holds a previous mutant. The backups have been left in place:' -ForegroundColor Red
+    foreach ($f in $failed) { Write-Host ("  {0}" -f $f) -ForegroundColor Red }
+    Write-Host 'Close whatever is holding them (a stray node or vite process is the usual cause), then run' -ForegroundColor Red
+    Write-Host 'this script again. It will finish the restore.' -ForegroundColor Red
+    throw "crash recovery could not restore $($failed.Count) file(s); refusing to run against a dirty tree"
+  }
+
+  # **A backup that survives its own restore is a hazard, so it is moved out of the way rather than left.**
+  #
+  # The removal below is `-ErrorAction SilentlyContinue` because a file can be locked by a process the
+  # killed run left behind. That silence is the problem: the directory stays, so *every* subsequent
+  # invocation restores from it again -- including invocations long after the crash, by which time the
+  # restored content is stale and silently overwrites whatever has been edited since. A recovery that
+  # overwrites real work is worse than no recovery.
+  #
+  # Found by accident: a machine restart mid-run left the directory behind, and each later run dutifully
+  # re-restored 25 files from it. Renaming it makes it inert and says so, so the state is visible rather
+  # than accumulating silently.
+  try {
+    Remove-Item $BackupDir -Recurse -Force -ErrorAction Stop
+  } catch {
+    $stale = "$BackupDir.stale-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    try {
+      Rename-Item -LiteralPath $BackupDir -NewName (Split-Path $stale -Leaf) -ErrorAction Stop
+      Write-Host ("  the backup directory could not be deleted (a process may still hold a file), so it has been moved to {0}" -f (Split-Path $stale -Leaf)) -ForegroundColor Yellow
+      Write-Host '  Delete it yourself when convenient. It is inert, but leaving it around is untidy.' -ForegroundColor DarkGray
+    } catch {
+      Write-Host ("  WARNING: the backup directory {0} could not be removed or moved aside. It WILL be" -f (Split-Path $BackupDir -Leaf)) -ForegroundColor Red
+      Write-Host '  restored again on the next run, overwriting anything edited since. Remove it by hand.' -ForegroundColor Red
+    }
+  }
   Write-Host 'Restored. If this recurs, the runner is being killed rather than failing.' -ForegroundColor Yellow
 }
 
@@ -711,6 +767,20 @@ $mutations = @($script:corpus)
 # exercised by a deliberate negative control instead of trusted.
 $selected = @(if ($Filter -eq '') { $mutations } else { $mutations | Where-Object { $_.label -match $Filter } })
 
+# `-Target` selects by the suite a mutation is measured against, rather than by its label.
+#
+# It exists because the two are not interchangeable and only one of them is knowable. A milestone that
+# changes arrangement logic does not know or care that twenty-two labels mention "align" or "distribute";
+# it knows it changed `src/model/arrange.test.ts`'s subject. The measured distribution makes the gap
+# concrete -- twenty-two of the 112 mutants target one file, and the five slowest targets are half the
+# run -- so picking the right target is worth several minutes, and it cannot be done by reading labels.
+#
+# The two combine as AND, which is what makes a slice precise: `-Filter snap -Target 'model/snap'` is
+# "the snapping mutants measured by the snapping unit suite", not a union.
+if ($Target -ne '') {
+  $selected = @($selected | Where-Object { $_.target -match $Target })
+}
+
 # `-CheckSites` applies every substitution and runs no tests.
 #
 # It exists because of how the corpus was rebuilt (see `mutations.ps1`). A substitution whose
@@ -745,14 +815,24 @@ if ($CheckSites) {
 }
 
 if ($List) {
-  foreach ($m in $mutations) {
+  # Iterates the **selection**, not the corpus. It iterated `$mutations`, which made `-List -Filter <x>`
+  # print the whole corpus and quietly ignore the filter -- so the one command whose job is to preview a
+  # slice could not be used to check a slice. That was survivable when the only selector was `-Filter`
+  # over labels; with `-Target` added it is the difference between checking a slice and guessing at it.
+  foreach ($m in $selected) {
     Write-Host ("  [{0}] {1}`n        -> {2}" -f $(if (Is-Browser $m.target) { 'browser' } else { 'unit   ' }), $m.label, $m.target)
   }
   Write-Host ''
-  Write-Host ("{0} mutations ({1} browser, {2} unit). Use -Filter '<regex>' on the label." -f `
-    $mutations.Count,
-    (@($mutations | Where-Object { Is-Browser $_.target }).Count),
-    (@($mutations | Where-Object { -not (Is-Browser $_.target) }).Count))
+  $where = if ($Filter -ne '' -and $Target -ne '') { "-Filter '$Filter' -Target '$Target'" }
+           elseif ($Target -ne '') { "-Target '$Target'" }
+           elseif ($Filter -ne '') { "-Filter '$Filter'" }
+           else { 'no filter' }
+  Write-Host ("{0} of {1} mutations ({2} browser, {3} unit), selected by {4}." -f `
+    $selected.Count, $mutations.Count,
+    (@($selected | Where-Object { Is-Browser $_.target }).Count),
+    (@($selected | Where-Object { -not (Is-Browser $_.target) }).Count),
+    $where)
+  Write-Host "Use -Filter '<regex>' on the label, or -Target '<regex>' on the suite it is measured against."
   exit 0
 }
 
@@ -760,8 +840,20 @@ if ($List) {
 # "every mutation was detected (0 of 0)", which reads exactly like a clean pass. This is the same
 # class of trap as the "site not found" rule one level down.
 if ($selected.Count -eq 0) {
-  Write-Host "no mutation matches -Filter '$Filter'." -ForegroundColor Red
-  Write-Host 'Use -List to see the labels.' -ForegroundColor Red
+  # Names whichever selector actually emptied the selection. It used to always blame `-Filter`, which
+  # was accurate when `-Filter` was the only selector and became a lie the moment `-Target` existed:
+  # `-Target 'typo'` reported `no mutation matches -Filter ''`, naming a filter the user never passed and
+  # pointing them at labels instead of at the regex that was wrong.
+  $cause = if ($Filter -ne '' -and $Target -ne '') { "-Filter '$Filter' -Target '$Target'" }
+           elseif ($Target -ne '') { "-Target '$Target'" }
+           elseif ($Filter -ne '') { "-Filter '$Filter'" }
+           else { 'the corpus (which should be impossible)' }
+  Write-Host "no mutation matches $cause." -ForegroundColor Red
+  if ($Target -ne '') {
+    Write-Host '-List shows the suite each mutation is measured against. -Target matches that path, not the label.' -ForegroundColor Red
+  } else {
+    Write-Host 'Use -List to see the labels. -Target selects by the suite instead.' -ForegroundColor Red
+  }
   exit 1
 }
 
