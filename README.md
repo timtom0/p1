@@ -553,6 +553,46 @@ still reported correctly.
 The claims live in a gitignored `scripts/mutation-claims.json` rather than in the corpus, which is
 hand-curated prose whose value is that a human wrote every label. Deleting the cache costs one slow run.
 
+### Running a slice, and when to
+
+A full corpus run is a **release gate, not a per-commit check** — it is a fixed 11.7 minutes and it has no
+early exit (see below), so there is no partial credit for starting it. While working on a milestone, run
+only the mutants that milestone can move. Two selectors, which combine as AND:
+
+```powershell
+.\scripts\mutation-check.ps1 -List                          # everything, with its target suite
+.\scripts\mutation-check.ps1 -List -Target 'model/arrange'   # preview a slice before running it
+.\scripts\mutation-check.ps1 -Target  'model/arrange'        # run it
+.\scripts\mutation-check.ps1 -Filter  'snap' -Target 'editor'  # snapping, in any editor suite
+```
+
+`-Filter` matches the mutation's **label**; `-Target` matches the **suite it is measured against**. They are
+not interchangeable, and only one of them is knowable while you work: a change to arrangement logic does not
+know or care that twenty-two labels happen to mention "align" or "distribute", but it knows exactly which
+file's subject it touched. `-Target` exists for that reason.
+
+Measured cost by target suite, from a warm full run — the distribution is very uneven, which is what makes
+slices worth choosing carefully:
+
+| top N targets | time | share of run |
+|---|---|---|
+| 3 | 233s | 34% |
+| 5 | 349s | 50% |
+| 8 | 450s | 65% |
+
+The five most expensive are `tests/editor/persistence.spec.ts` (88s, 3 mutants),
+`src/model/arrange.test.ts` (84s, **22** mutants), `tests/editor/print.spec.ts` (60s, 8),
+`tests/editor/snap.spec.ts` (60s, 5) and `tests/editor/group-geometry.spec.ts` (57s, 4). One file — the
+arrangement suite — carries a fifth of the entire corpus.
+
+Slicing by target is worth about **4x** on the largest slice: `-Target 'model/arrange'` runs its 22 mutants
+in **2.7 min** against 11.7 for the corpus. A selector regex that matches nothing is refused with a message
+naming the selector at fault and exits 1 — it does not quietly run zero mutants and report a clean pass.
+
+Two things a slice must not be trusted for. It does not re-verify the accepted survivor, whose cost is
+inherent to the whole run; and it is not a substitute for the gate before a milestone lands, because a
+mutation in a suite you did not name cannot fail a run that never applied it.
+
 Parallelism across *mutants* is implemented and **off by default**, because on this machine it does not
 pay at any width. Running the *same* work N ways at once:
 
@@ -588,6 +628,14 @@ corpus measured 62.2s and later 97.4s on byte-identical code, and a full serial 
 later 24.4 min. Comparisons here are only meaningful when taken back to back, and an earlier version of
 this file quoted a 22x figure that was really a broken server lifecycle rather than a property of
 parallelism.
+
+**A mutation run needs the machine to itself, and that is not a style preference.** The same corpus, on the
+same commit, with nothing else changed, reported **11 undetected mutations** while a second agent was
+loading the box with its own `vitest` processes, and **1** — the single accepted survivor — once the box was
+idle. The contended run did not merely run slower; it changed verdicts, in the worst possible direction, by
+inventing coverage gaps that did not exist. Treat a survivor count from a busy machine as meaningless, and
+re-run before believing it. The same applies to timing: the contended full run took 19.6 min against 9.6 min
+idle.
 
 The implementation notes behind all of this are in
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) — the
