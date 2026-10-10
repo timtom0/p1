@@ -83,8 +83,26 @@ $ErrorActionPreference = 'Continue'
 #     mode, and what it saves in test time it more than gives back in collection and teardown.
 #   * **Dropping the per-mutant `vite build`.** Not possible, and the reason is the mechanism rather than an
 #     accident: since M15 the browser suite is served `dist/`, so a source mutation reaches a browser test
-#     *only* through a rebuild. `tsc --noEmit` was already once per run, not per mutant; the build is ~4.5s
+#     *only* through a rebuild. `tsc --noEmit` was already once per run, not per mutant; the build is ~2.2s
 #     and is the price of the mutation being real.
+#   * **A persistent Playwright browser server** (`PW_TEST_CONNECT_WS_ENDPOINT`, a supported feature).
+#     Worth a repeatable 2.5s per invocation, about 1.5 minutes over the browser half -- and it **serves a
+#     stale bundle.** The same check used for the claims cache settles it: mutate, detect, revert, run. A
+#     self-launched browser gives detected-then-passes; the persistent one gives detected-then-**still
+#     fails** against reverted source. Here that is not a flaky result but a false survivor.
+#   * **A persistent Vitest host**, to stop paying process bootstrap 75 times. Promising in isolation
+#     (6.8s for three runs against ~11.7s for three CLI invocations) and **10x worse on the real corpus**,
+#     353s against 37s for nine mutants. A probe on one small spec said the opposite of the truth.
+#   * **`--minify false`** for a faster build: 0.5s saved, bundle 127kB to 284kB. A fidelity loss for 0.7%
+#     of the run.
+#   * **`vite build --watch`**, at 0.57s against 2.2s a rebuild. Implemented, measured, and **reverted
+#     because it made the run slower: 14.1 min against 11.7.** The reason is structural and worth stating,
+#     because it is not obvious: a watcher rebuilds on *any* change under `src/`, and the 75 **unit**
+#     mutants mutate that same tree while needing no bundle at all. So it did 75 pointless rebuilds, and
+#     two unit mutations of `deserialize.ts` failed the watcher build *asynchronously* -- landing after the
+#     next browser mutant had taken its snapshot, which then reported a build failure that belonged to a
+#     mutant three positions earlier. Per-mutant builds are not a cost that can be amortised across a
+#     corpus only half of which needs them.
 #
 # **Wall-clock figures from this machine are only comparable when measured back to back.** The slowest
 # mutant in the corpus measured 62.2s and then 97.4s on *byte-identical* code hours apart, and a full
