@@ -531,8 +531,8 @@ back — and the existing test asserted only that the inspector went *mixed*, wh
 satisfies. The M8 test asserts the whole delta, and a mutation of the fix is what keeps it
 fixed.
 
-**On running it: ~12 minutes warm, ~20 the first time.** The corpus is 36 browser mutants and 76 unit, and
-the browser half is 72% of the cost. Two changes brought it down from ~34 minutes:
+**On running it: ~7 minutes warm.** The corpus is 36 browser mutants and 76 unit. Three changes brought it
+down from ~34 minutes:
 
 1. **`--max-failures=1`** on browser targets. The only question asked of a suite is "did it fail?", and for
    a detected mutant that is settled by the first failing test, so running the rest cannot change the
@@ -541,6 +541,22 @@ the browser half is 72% of the cost. Two changes brought it down from ~34 minute
    tests in print, 39 in layers, 40 in selection. Running only the test that catches the mutation is
    **6.7x** cheaper across those six specs, and it took the full corpus from **19.8 min to 11.7 min**, with
    35 of 36 browser mutants on the fast path.
+3. **One long-lived Vitest process** for the unit half (`scripts/vitest-host.mjs`). Each unit mutant cost
+   ~3.9s, of which ~50ms was the tests — the rest was node startup, the `vitest.cmd` shim, config load and
+   worker fork, paid 75 times. Running them inside one persistent process measured **45.8%** faster than
+   the CLI across 12 real targets (1083ms vs 1999ms per target, back to back), and took the full corpus
+   from **9.6 min to 7.0 min**.
+
+   It is safe because `startVitest` builds a fresh Vitest — and so a fresh Vite server and module graph —
+   per mutant, meaning each run reads the mutated file from disk. The *faster* variant of the same idea is
+   not: `createVitest` + `rerunFiles`, reusing one Vite server, measured 4x quicker again and silently
+   wrong, keeping a transformed module of the file under mutation so that a clean run after a revert still
+   reported the failure. That is a manufactured survivor, so it is rejected. Fidelity is asserted by a
+   clean → mutate → clean check **on disk**, not inferred from the timings — an earlier probe of this
+   skipped that assertion and produced a false negative, blaming a correct implementation.
+
+   The host is on by default and falls back to one process per mutant if it cannot start, wedges, or
+   exits, so a host problem costs time rather than a run. `-NoVitestHost` forces the old path.
 
 Narrowing cannot weaken the guarantee, which is why it is safe to enable by default. A cached claim — the
 title of the test that caught a given mutant, discovered from real runs — is a *sufficient* condition for
@@ -555,7 +571,7 @@ hand-curated prose whose value is that a human wrote every label. Deleting the c
 
 ### Running a slice, and when to
 
-A full corpus run is a **release gate, not a per-commit check** — it is a fixed 11.7 minutes and it has no
+A full corpus run is a **release gate, not a per-commit check** — it is a fixed ~7 minutes and it has no
 early exit (see below), so there is no partial credit for starting it. While working on a milestone, run
 only the mutants that milestone can move. Two selectors, which combine as AND:
 
@@ -586,7 +602,7 @@ The five most expensive are `tests/editor/persistence.spec.ts` (88s, 3 mutants),
 arrangement suite — carries a fifth of the entire corpus.
 
 Slicing by target is worth about **4x** on the largest slice: `-Target 'model/arrange'` runs its 22 mutants
-in **2.7 min** against 11.7 for the corpus. A selector regex that matches nothing is refused with a message
+in **2.7 min** against ~7 for the corpus. A selector regex that matches nothing is refused with a message
 naming the selector at fault and exits 1 — it does not quietly run zero mutants and report a clean pass.
 
 Two things a slice must not be trusted for. It does not re-verify the accepted survivor, whose cost is
@@ -612,7 +628,7 @@ That also settles the obvious scheduling idea, cheap-and-high-yield-first. It is
 does not apply here: **a mutation check has no early exit**, so all 112 verdicts are required whatever the
 order. Ordering only pays by feeding a parallel scheduler, and the scheduler has nothing to give.
 
-Of the 11.7 minutes, roughly 3.5 is now structural per-mutant overhead on the browser half — a ~2.2s build
+Of the ~7 minutes, roughly 3.5 is now structural per-mutant overhead on the browser half — a ~2.2s build
 and a ~3.2s Playwright invocation floor, 36 times over. The build cannot be dropped, since the browser suite
 is served `dist/` and that build *is* the mechanism by which a source mutation reaches a test; the floor
 would need a browser held open across mutants, which Playwright's runner does not expose for a bundle that

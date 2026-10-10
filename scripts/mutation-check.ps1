@@ -4,6 +4,11 @@ param(
   [switch] $NoBrowser,
   [switch] $CheckSites,
 
+  # Runs each unit suite inside one long-lived Node process instead of one `vitest` process per mutant.
+  # Default on; `-NoVitestHost` restores the old path, which is also the automatic fallback if the host
+  # cannot start, wedges, or exits.
+  [switch] $NoVitestHost,
+
   # Selects by the suite a mutation is measured against, rather than by its label. See the note at the
   # selection site for why a milestone needs this and `-Filter` does not reach it.
   [string] $Target = '',
@@ -94,9 +99,14 @@ $ErrorActionPreference = 'Continue'
 #     stale bundle.** The same check used for the claims cache settles it: mutate, detect, revert, run. A
 #     self-launched browser gives detected-then-passes; the persistent one gives detected-then-**still
 #     fails** against reverted source. Here that is not a flaky result but a false survivor.
-#   * **A persistent Vitest host**, to stop paying process bootstrap 75 times. Promising in isolation
-#     (6.8s for three runs against ~11.7s for three CLI invocations) and **10x worse on the real corpus**,
-#     353s against 37s for nine mutants. A probe on one small spec said the opposite of the truth.
+#   * **A faster variant of the Vitest host is the dangerous one, and it was measured.** `createVitest` +
+#     `rerunFiles`, reusing one Vite server across runs, came in **4x faster again** than the host that
+#     shipped (0.50s vs 1.29s per mutant) and is **silently wrong**: it keeps a transformed module of the
+#     file under mutation in memory, so a clean run *after a revert* still reports the failure. That is a
+#     manufactured survivor -- the exact failure the persistent Playwright server above also produces, and
+#     the reason both are rejected. A speedup this large that is not gated by a clean -> mutate -> revert
+#     check on disk will invent coverage gaps. `startVitest` per request is the version that is both fast
+#     and correct, because it builds a fresh Vite server and module graph every time.
 #   * **`--minify false`** for a faster build: 0.5s saved, bundle 127kB to 284kB. A fidelity loss for 0.7%
 #     of the run.
 #   * **`vite build --watch`**, at 0.57s against 2.2s a rebuild. Implemented, measured, and **reverted
@@ -622,6 +632,125 @@ function Save-Claims {
   $script:claimsDirty = $false
 }
 
+function Invoke-VitestCli([string] $target) {
+  return (& $Vitest run $target --reporter=basic 2>&1 | Out-String)
+}
+
+# --- the persistent Vitest host -------------------------------------------------------------------------------------
+#
+# The unit half pays ~3.9s per mutant and only ~50ms of that is the tests. The rest is bootstrap: node
+# startup, the `vitest.cmd` shim, config load, worker fork -- 75 times over. `scripts/vitest-host.mjs`
+# keeps one Node process alive and runs `startVitest` per mutant inside it, which measured **45.8%**
+# faster than the CLI across 12 real unit targets (1083ms vs 1999ms per target), back to back.
+#
+# **Why this is safe when the faster alternative is not.** `startVitest` builds a fresh Vitest, and so a
+# fresh Vite server and module graph, per request, so each run reads the mutated file from disk. The
+# faster variant -- `createVitest` + `rerunFiles`, reusing one Vite server -- was measured 4x quicker than
+# *this* and is silently wrong: it keeps a transformed module of the file under mutation in memory, so a
+# clean run after a revert still reports the failure. That would manufacture survivors, the one outcome
+# this tool must never produce by accident. Fidelity is asserted by a clean -> mutate -> clean check on
+# disk, not assumed from the timings.
+#
+# Anything that goes wrong falls back to the CLI. A host that cannot start, times out, or answers
+# `ok: false` is not a reason to fail a run that the old path would have completed.
+$script:vitestHost = $null
+$script:vitestHostDir = $null
+$script:vitestHostSeq = 0
+$script:vitestHostBroken = $false
+
+function Start-VitestHost {
+  if ($NoVitestHost) { return $false }
+  if ($null -ne $script:vitestHost) { return $true }
+  $script:vitestHostDir = Join-Path $env:TEMP ("p1-vitest-host-" + $PID)
+  if (Test-Path $script:vitestHostDir) { Remove-Item $script:vitestHostDir -Recurse -Force -ErrorAction SilentlyContinue }
+  $null = New-Item -ItemType Directory -Path $script:vitestHostDir -Force
+
+  $scriptPath = Join-Path $PSScriptRoot 'vitest-host.mjs'
+  $logOut = Join-Path $script:vitestHostDir 'host.out.log'
+  $logErr = Join-Path $script:vitestHostDir 'host.err.log'
+  # `-WorkingDirectory` is set explicitly: `Set-Location` does not change
+  # `[Environment]::CurrentDirectory`, which is what a child process inherits. See `Build-Workspace`.
+  $proc = Start-Process -FilePath 'node.exe' `
+    -ArgumentList $scriptPath, $script:vitestHostDir, (Split-Path $PSScriptRoot -Parent) `
+    -WorkingDirectory (Split-Path $PSScriptRoot -Parent) `
+    -RedirectStandardOutput $logOut -RedirectStandardError $logErr `
+    -WindowStyle Hidden -PassThru
+
+  # The host is only useful if it can answer. It has no ready signal, so the first request is the probe --
+  # and it is a real mutant run, so a host that starts slowly costs nothing beyond what the CLI cost.
+  $script:vitestHost = $proc
+  return $true
+}
+
+function Stop-VitestHost {
+  if ($null -eq $script:vitestHost) { return }
+  try {
+    if (-not $script:vitestHost.HasExited) {
+      # id 0 is the documented shutdown request; the host also self-terminates when idle, so a runner
+      # that was killed outright does not leave the process behind.
+      $req = Join-Path $script:vitestHostDir 'req.json'
+      [System.IO.File]::WriteAllText($req + '.tmp', '{"id":0,"target":""}')
+      if (Test-Path $req) { Remove-Item $req -Force -ErrorAction SilentlyContinue }
+      [System.IO.File]::WriteAllText($req + '.tmp', '{"id":0,"target":""}')
+      [System.IO.File]::Move($req + '.tmp', $req)
+      if (-not $script:vitestHost.WaitForExit(3000)) { Stop-Process -Id $script:vitestHost.Id -Force -ErrorAction SilentlyContinue }
+    }
+  } catch { }
+  $script:vitestHost = $null
+  if ($script:vitestHostDir -and (Test-Path $script:vitestHostDir)) {
+    Remove-Item $script:vitestHostDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $script:vitestHostDir = $null
+}
+
+function Invoke-UnitTest([string] $target) {
+  if ($script:vitestHostBroken) { return (Invoke-VitestCli $target) }
+  try {
+    if (-not (Start-VitestHost)) { return (Invoke-VitestCli $target) }
+
+    $script:vitestHostSeq++
+    $mine = $script:vitestHostSeq
+    $req = Join-Path $script:vitestHostDir 'req.json'
+    $res = Join-Path $script:vitestHostDir 'res.json'
+
+    # Temp file + rename: the host must never observe a half-written request.
+    [System.IO.File]::WriteAllText($req + '.tmp', ('{{"id":{0},"target":{1}}}' -f $mine, ($target | ConvertTo-Json -Compress)))
+    if (Test-Path $req) { Remove-Item $req -Force -ErrorAction SilentlyContinue }
+    [System.IO.File]::Move($req + '.tmp', $req)
+
+    # Bounded, because an unanswered request must not hang the run forever. 120s is far above the ~2s a
+    # unit suite takes; anything near it means the host is wedged, which is a fallback, not a verdict.
+    $deadline = (Get-Date).AddSeconds(120)
+    while ($true) {
+      if (Test-Path $res) {
+        $parsed = $null
+        try { $parsed = [System.IO.File]::ReadAllText($res) | ConvertFrom-Json } catch { $parsed = $null }
+        if ($parsed -and $parsed.id -eq $mine) {
+          if (-not $parsed.ok) { throw "host error: $($parsed.error)" }
+          return [string] $parsed.output
+        }
+      }
+      if ((Get-Date) -gt $deadline) { throw 'the Vitest host did not answer within 120s' }
+      if ($script:vitestHost.HasExited) {
+        # `ExitCode` reads empty unless the process object has been refreshed, so report the fact rather
+        # than a blank that looks like a truncated sentence.
+        $null = $script:vitestHost.WaitForExit(200)
+        $code = $null
+        try { $code = $script:vitestHost.ExitCode } catch { }
+        throw ("the Vitest host exited unexpectedly{0}" -f $(if ($null -ne $code) { " with code $code" } else { '' }))
+      }
+      Start-Sleep -Milliseconds 5
+    }
+  } catch {
+    # Fall back for the rest of the run rather than retrying a broken host 75 times, and say so: a silent
+    # fallback would mean the timings in the summary no longer describe what ran.
+    Write-Host ("WARNING: the persistent Vitest host failed ({0}); falling back to one process per mutant." -f $_.Exception.Message) -ForegroundColor Yellow
+    $script:vitestHostBroken = $true
+    Stop-VitestHost
+    return (Invoke-VitestCli $target)
+  }
+}
+
 function Invoke-Target([string] $target, [string] $label) {
   if (Is-Browser $target) {
     if ($NoBrowser) { return $null }
@@ -698,7 +827,7 @@ function Invoke-Target([string] $target, [string] $label) {
     Set-Claim $label $full
     return $full
   }
-  return (& $Vitest run $target --reporter=basic 2>&1 | Out-String)
+  return (Invoke-UnitTest $target)
 }
 
 # One mutation: apply, run the target, restore, and record how long it took.
@@ -995,8 +1124,10 @@ if ($WorkerIndex -ge 0) {
       $records | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ResultsFile -Encoding utf8
     }
   } finally {
-    # Nothing to stop: the servers belong to the parent, which tears them down after `Wait-Job`.
+    # The servers belong to the parent, which tears them down after `Wait-Job`. The Vitest host does not:
+    # each worker starts its own, so without this every pool run leaked one Node process per worker.
     Stop-DevServer
+    Stop-VitestHost
   }
   exit 0
 }
@@ -1159,6 +1290,9 @@ try {
   }
 } finally {
   Stop-DevServer
+  # The host holds a Node process and a temp directory. If the runner is killed outright this never runs,
+  # which is why the host also exits on its own after an idle period -- see `vitest-host.mjs`.
+  Stop-VitestHost
   Save-Claims
   Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue
   $total.Stop()
