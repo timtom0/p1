@@ -14,3 +14,8 @@ Thumbs.db
 # Playwright (planned, see tests/visual/README.md)
 test-results/
 playwright-report/
+
+# Narrowed-replay cache: a machine-generated map from mutation label to the test that catches it.
+# Disposable by design — deleting it costs one slow run and nothing else, which is exactly why it is
+# not committed. `scripts/mutations.ps1` stays hand-curated; this is not.
+scripts/mutation-claims.json

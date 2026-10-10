@@ -259,6 +259,21 @@ if ($WorkerIndex -ge 0) {
 $script:timings    = @()
 $script:corpus     = @()
 
+# Narrowed-replay state. `claimRun` keys a claim to the identity of the suite it was learned against --
+# the resolved target plus the mutated file's size -- so editing a spec or the source under test
+# invalidates claims rather than trusting a stale one.
+$script:claims        = $null
+$script:claimsDirty   = $false
+$script:claimsMissed  = @()
+$script:claimRun      = ''
+
+# Whether the mutant now in flight took the narrowed fast path. A flag rather than a write to
+# `$script:timings[-1]`, because that entry belongs to the *previous* mutant: the record for the current
+# one is appended after `Invoke-Target` returns. Setting the flag on the wrong element looked like it
+# worked -- the summary still printed a plausible count, attributing each narrowed run to the mutant
+# before it.
+$script:narrowedNow   = $false
+
 # Every server this process started, so a single `Stop-DevServer` can tear all of them down. The serial
 # path starts at most two; the parallel path starts up to two per browser workspace.
 $script:servers    = @()
@@ -460,7 +475,76 @@ function Is-Browser([string] $target) {
   return $target -like '*.spec.ts' -or $target -like '*tests/editor/persistence*'
 }
 
-function Invoke-Target([string] $target) {
+# --- narrowed replay cache --------------------------------------------------------------
+#
+# Maps a mutation label to the title of the test that caught it, so the next run can execute that one
+# test instead of walking the file. Discovered from real runs, never hand-written.
+#
+# **Why a cache and not a column in `mutations.ps1`.** The corpus is hand-curated prose whose value is
+# that a human wrote each label to say what behaviour is being broken. A machine-generated title would put
+# a field nobody curates into the file whose discipline *is* curation, and it would need re-deriving by
+# hand after every test rename. This lives beside the runner, is disposable, and deleting it costs one
+# slow run and nothing else.
+#
+# **Staleness cannot cause a false detection.** A claim is a *sufficient* condition for "this suite fails",
+# never a necessary one, so replaying a stale claim can only be wrong in the safe direction: the named
+# test passes, the fallback runs the full file, and the original semantics decide. The one case worth
+# naming is a claim that has drifted onto a different failing test in the same spec -- and even then the
+# verdict is correct, because that test is in the suite, so the suite did fail.
+function Claims-File { return (Join-Path $PSScriptRoot 'mutation-claims.json') }
+
+function Get-Claim([string] $label) {
+  if ($null -eq $script:claims) {
+    if (Test-Path (Claims-File)) {
+      try { $script:claims = Get-Content (Claims-File) -Raw | ConvertFrom-Json }
+      catch { $script:claims = @{} }
+    } else { $script:claims = @{} }
+  }
+  $key = "$($script:claimRun):$label"
+  if ($script:claims.PSObject.Properties.Name -contains $key) { return $script:claims.$key }
+  return $null
+}
+
+# Records which test failed, from the line reporter's failure header:
+#
+#     1) [chromium] > tests\editor\print.spec.ts:145:3 > print hides the editor > no editor ...
+#
+# **The separator is not parsed, and that is deliberate.** Playwright prints U+203A between the segments,
+# but it reaches this function as *three* codepoints (915, 199, 9553), because the text has been through a
+# PowerShell pipeline before the encoding settles. Splitting on the character literally matches nothing --
+# and a run that silently records nothing reports "0 of N narrowed", which is indistinguishable from
+# "narrowing does not help here". That is the failure this paragraph exists to prevent, and it is why the
+# parse keys on ASCII that cannot drift.
+#
+# Everything after the `file.spec.ts:line:col` anchor is taken, non-ASCII dropped and whitespace collapsed.
+# Verified against real captured output, and confirmed to select exactly one test through `-g`, which is
+# the only property that matters.
+#
+# The *whole* path (describe blocks included) is stored rather than the leaf, because `-g` matches the
+# concatenated title and a leaf name reused under two describes would otherwise select both.
+function Set-Claim([string] $label, [string] $output) {
+  if ($output -notmatch '\d+ failed') { return }
+  if ($output -notmatch '(?m)^\s*\d+\)\s*\[[^\]]+\].*?\.spec\.ts:\d+:\d+(.*)$') { return }
+  $title = ($Matches[1] -replace '[^\x20-\x7E]', ' ' -replace '\s+', ' ').Trim()
+  if ($title -eq '') { return }
+  $key = "$($script:claimRun):$label"
+  Add-Member -InputObject $script:claims -NotePropertyName $key -NotePropertyValue $title -Force
+  $script:claimsDirty = $true
+}
+
+function Save-Claims {
+  if (-not $script:claimsDirty) { return }
+  try {
+    $script:claims | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Claims-File) -Encoding utf8
+    $count = @($script:claims.PSObject.Properties).Count
+    Write-Host ("  recorded {0} narrowed-replay claim(s) to scripts\{1}" -f $count, (Split-Path (Claims-File) -Leaf)) -ForegroundColor DarkGray
+  } catch {
+    Write-Host 'WARNING: could not write the narrowed-replay cache; the next run will rediscover' -ForegroundColor Yellow
+  }
+  $script:claimsDirty = $false
+}
+
+function Invoke-Target([string] $target, [string] $label) {
   if (Is-Browser $target) {
     if ($NoBrowser) { return $null }
     # **Rebuild before every browser mutant.** This is not an optimisation, it is the whole mechanism.
@@ -474,19 +558,53 @@ function Invoke-Target([string] $target) {
     # mode for this tool: 20 survivors that all look like coverage gaps and are in fact a harness that
     # stopped testing anything. That is exactly what happened the first time this was run.
     #
-    # The build is ~1s, against ~30-85s per browser mutant, so paying it every time is cheap.
     # `--mode=basic` would be wrong: the mutants are in source files, not CSS, so the CSS pipeline is
     # irrelevant, but the type check is deliberately *not* run -- a mutant that does not compile is still
     # a mutant, and the bundle should fail loudly in the browser rather than being silently skipped here.
-    #
-    # **`--max-failures=1` is free accuracy we were throwing away.** The only question this tool asks of a
-    # suite is "did it fail?", and for a detected mutant that is settled by the first failing test.
-    # Running the remaining tests cannot change the answer, and for a large target it is most of the
-    # cost: measured on the M19 print suite, a mutant caught by its first test went from **70.3s to
-    # 30.0s**. Detection is unaffected -- the check below is `$out -match '\d+ failed'`, and Playwright
-    # still prints `1 failed` -- so this changes the wall clock and nothing else.
     $null = & $ViteBuild 'build'
-    return (& $Playwright test $target --reporter=line --max-failures=1 2>&1 | Out-String)
+
+    # **Narrowed replay: the one change that made the browser half bearable.**
+    #
+    # `--max-failures=1` stops at the first failure but still *walks* every test up to it, and the specs
+    # here are large: 18 tests in print, 19 in snap, 39 in layers, 40 in selection. Measured per spec,
+    # running the whole file against running only the test that catches the mutation:
+    #
+    #     | spec                | full   | 1 test | ratio |
+    #     |---------------------|--------|--------|-------|
+    #     | print.spec.ts       |  35.8s |   8.0s |  4.5x |
+    #     | snap.spec.ts        |  81.4s |  12.7s |  6.4x |
+    #     | layers.spec.ts      |  98.2s |   9.9s |  9.9x |
+    #     | selection.spec.ts   |  78.8s |  10.3s |  7.7x |
+    #     | group-geometry      |  45.7s |   9.6s |  4.7x |
+    #     | persistence.spec.ts |  90.3s |  13.5s |  6.7x |
+    #     | aggregate           | 430s   |   64s  |  6.7x |
+    #
+    # Over the full corpus this took **19.2 min to 13.7 min**, with 35 of 36 browser mutants running a
+    # single cached test and the verdict unchanged at 111 of 112.
+    #
+    # **This is a fast path, never a substitute.** A cached claim can only ever *prove* a detection: if
+    # the named test fails, the suite would have failed too, so the verdict is identical and better
+    # evidenced. Anything else -- the claim is stale, the test was renamed, several tests match the
+    # pattern, or nothing failed -- falls back to the full run and the original semantics decide. So no
+    # run can report a survivor *because of* narrowing, and the accepted-survivor policy is untouched.
+    #
+    # Verified deliberately, both ways: the accepted survivor still reports NOT FOUND and exits 1, and a
+    # claim poisoned to point at a passing test falls back and still reports the correct verdict.
+    $claim = Get-Claim $label
+    if ($claim) {
+      $narrow = (& $Playwright test $target '--reporter=line' '--max-failures=1' '-g' $claim 2>&1 | Out-String)
+      if ($narrow -match '\d+ failed') {
+        $script:narrowedNow = $true
+        return $narrow
+      }
+      # No detection via the claim. Not an error: this is the normal case for a *survivor*, whose claim can
+      # never be recorded because no test ever fails. Fall through to the full run.
+      $script:claimsMissed += $label
+    }
+
+    $full = (& $Playwright test $target '--reporter=line' '--max-failures=1' 2>&1 | Out-String)
+    Set-Claim $label $full
+    return $full
   }
   return (& $Vitest run $target --reporter=basic 2>&1 | Out-String)
 }
@@ -499,12 +617,20 @@ function Mutate([string] $label, [string] $path, [scriptblock] $apply, [string] 
   $raw = [System.IO.File]::ReadAllText($path)
   $original = $raw.Replace("`r`n", "`n")
   $watch = [System.Diagnostics.Stopwatch]::StartNew()
+  # Identity of the suite this mutant is about to run against, used to key its narrowed-replay claim.
+  #
+  # Both files matter and both are keyed on **byte length**, not on any text normalisation: the tree has
+  # mixed line endings (noted in the M6 notes), so a length taken after CRLF normalisation disagrees with
+  # the same file read raw, and every claim silently misses. Measured byte size has no such ambiguity.
+  # The target catches an edited spec; the mutated file catches an edit to the behaviour under test that
+  # could change *which* test notices.
+  $script:claimRun = "$target|$path|" + (Get-Item $path).Length + '|' + (Get-Item $target).Length
   try {
     $mutated = & $apply $original
     if ($mutated -eq $original) { throw "mutation site not found: $label" }
     Save-BeforeMutation $path
     [System.IO.File]::WriteAllText($path, $mutated)
-    $out = Invoke-Target $target
+    $out = Invoke-Target $target $label
   } finally {
     [System.IO.File]::WriteAllText($path, $raw)
   }
@@ -521,7 +647,9 @@ function Mutate([string] $label, [string] $path, [scriptblock] $apply, [string] 
   $detail = if ($out -match '(\d+) failing|(\d+) failed') { "$($Matches[1])$($Matches[2]) failing" } else { 'no failure reported' }
   $script:timings += [pscustomobject]@{
     label = $label; target = $target; seconds = $watch.Elapsed.TotalSeconds; detected = $failed
+    narrowed = $script:narrowedNow; browser = (Is-Browser $target)
   }
+  $script:narrowedNow = $false
   if ($failed) {
     Write-Host ("detected   {0} [{1:N1}s] ({2})" -f $label, $watch.Elapsed.TotalSeconds, $detail) -ForegroundColor Green
     return $true
@@ -903,6 +1031,7 @@ try {
   }
 } finally {
   Stop-DevServer
+  Save-Claims
   Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue
   $total.Stop()
 }
@@ -917,6 +1046,15 @@ Write-Host ''
 Write-Host '--- slowest mutants -----------------------------------------------'
 $script:timings | Sort-Object seconds -Descending | Select-Object -First 5 |
   ForEach-Object { Write-Host ("  {0,7:N1}s  {1}" -f $_.seconds, $_.label) }
+
+# Narrowed replay is reported rather than assumed, because a number nobody checks is a number nobody
+# should believe. `missed` counts claims that no longer detected anything and fell back to the full run --
+# a rising count is the signal that the cache has drifted away from the suite.
+$narrowed   = @($script:timings | Where-Object { $_.narrowed })
+$browserRun = @($script:timings | Where-Object { $_.browser })
+Write-Host ''
+Write-Host ("narrowed replay: {0} of {1} browser mutants ran a single cached test ({2} claim(s) missed, fell back to the full run)" -f `
+  $narrowed.Count, $browserRun.Count, $script:claimsMissed.Count) -ForegroundColor DarkGray
 Write-Host ''
 Write-Host ("ran {0} of {1} selected ({2} skipped by -NoBrowser) in {3:N1}s ({4:N1} min)" -f `
   $ran.Count, $selected.Count, $skippedBrowser, $total.Elapsed.TotalSeconds, $total.Elapsed.TotalMinutes)
