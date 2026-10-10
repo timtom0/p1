@@ -108,18 +108,50 @@ $ErrorActionPreference = 'Continue'
 #     |----------------------------------------------|--------|-----------|
 #     | mixed                                          |  111.6s |   187.7s  |
 #
-#     1.68x slower. Four concurrent Chromium instances plus four builds on four physical cores contend for
-#     the thing the browser mutants actually need, and unit work does not make up for it: four concurrent
-#     Vitest runs against four serial ones measured 13.66s against 16.93s, so the machine yields about
-#     **1.24x** from four-way concurrency on the cheap half of the corpus.
+#     Measured against a scaling curve rather than one end-to-end comparison, because an earlier version of
+#     this note drew a conclusion from a single figure. The verdict held; the reasoning did not.
 #
-#     **The first version of this note was wrong, and the way it was wrong is the useful part.** It
-#     reported 22x and 13x, from runs in which every worker sat waiting out a readiness budget against a
-#     server that had never started -- see `Start-DevServer`, where a `Start-Process` issued from inside a
-#     `Start-Job` produces a process that is alive, silent and never binds its port. So those figures
-#     measured a broken harness, not parallelism, and I attributed them to contention and wrote them down
-#     as a result. The verdict survived; the evidence did not, and had I checked the logs instead of the
-#     timings I would have found it in one run.
+#     First, where the time is. From a full serial run: **36 browser mutants, 1052s (72%)**; 75 unit mutants,
+#     402s (28%). This is a browser-bound problem, so any win has to come from the browser half.
+#
+#     Then, how much this machine can overlap. Running the *same* work N ways at once:
+#
+#     | N concurrent | Vitest (unit) | Playwright (browser) |
+#     |--------------|---------------|----------------------|
+#     | 1             | 3.87s         | 30.6s                |
+#     | 2             | 7.64s (1.01x) | 79.0s (0.78x)        |
+#     | 4             | 20.60s (0.75x)| 127.4s (0.96x)       |
+#
+#     **There is no parallelism here at any width** - both halves are at or below 1.0x by two concurrent.
+#     One spec run already occupies the machine; a second does not queue behind it, it competes with it.
+#
+#     **This is also why ordering the corpus by cost cannot help**, which is worth stating because cheap-
+#     high-yield-first is a sound idea in general. A mutation check has **no early exit**: all 112 verdicts
+#     are required whatever the order, so ordering only pays by feeding a parallel scheduler - and the
+#     scheduler has nothing to give. The idea is right and the hardware refuses it.
+#
+#     Two hypotheses were tested rather than assumed, each having looked like the culprit:
+#
+#     * **A shared Vite cache.** `node_modules` is a junction, so a worker's default `cacheDir`
+#       (`<root>/node_modules/.vite`) *is* the repository's shared cache, and four workers writing one cache
+#       directory is a plausible contention source. Re-measured with a per-workspace `cacheDir`: 4x went
+#       from 1.01x to **0.75x**. Worse. The cache was innocent.
+#     * **Thread oversubscription.** Vitest sizes its pool from `os.cpus()`, so four processes
+#       oversubscribe. Constraining each to one thread was slower still (17.46s against 13.66s).
+#
+#     What is left in the 17.5 minutes, per browser mutant: a **~2.2s build** and a **~3.2s Playwright
+#     invocation floor** (config load, browser launch, teardown), the remainder being tests. The build is the
+#     mechanism, not overhead - the browser suite is served `dist/`, so a mutation reaches it only through a
+#     rebuild (M15, F17) - and the floor would need a browser held open across mutants, which Playwright's
+#     runner does not expose for a bundle that changes between runs. So roughly 3 minutes of the 17.5 are
+#     structural and the rest is test execution that has to happen.
+#
+#     **The 22x and 13x figures an earlier version of this note reported were a broken harness, not a
+#     property of parallelism.** They came from runs where every worker waited out a readiness budget
+#     against a server that had never started - see `Start-DevServer`, where a `Start-Process` issued from
+#     inside a `Start-Job` yields a process that is alive, silent and never binds its port. The verdict was
+#     right; the evidence was not, and it should have been read off the server logs rather than inferred
+#     from timings.
 #
 #     So `-Workers` defaults to **1**, the pool is kept because it is correct and would pay on a machine
 #     with cores to spare, and `--max-failures=1` above remains the *only* change that made this faster.

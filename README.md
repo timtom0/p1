@@ -536,16 +536,34 @@ one change that halved it was `--max-failures=1` on browser targets: the only qu
 "did it fail?", and for a detected mutant that is settled by the first failing test, so running the rest
 cannot change the answer. Browser mutants went from 30-85s to 3-16s each.
 
-Parallelism across *mutants* is implemented and **off by default**, because on an ordinary 4-core machine
-it does not pay: a mixed slice of 8 mutants measured 111.6s serial against 187.7s across 4 workers, run back
-to back. Four concurrent Chromium instances contend for the thing the browser mutants need, and the unit
-half cannot make up for it — four concurrent Vitest runs beat four serial ones by only 1.24x. It stays
-behind `-Workers` because it is correct and would pay with cores to spare.
+Parallelism across *mutants* is implemented and **off by default**, because on this machine it does not
+pay at any width. Running the *same* work N ways at once:
 
-Two things that look like obvious next steps were measured and rejected: `--bail=1` for the unit half (the
-analogue of the flag above) is **2.3x slower**, and dropping the per-mutant `vite build` is not possible at
-all — since the browser suite is served `dist/`, that build *is* the mechanism by which a source mutation
-reaches a browser test.
+| N concurrent | Vitest (unit) | Playwright (browser) |
+|---|---|---|
+| 1 | 3.87s | 30.6s |
+| 2 | 7.64s (1.01x) | 79.0s (0.78x) |
+| 4 | 20.60s (0.75x) | 127.4s (0.96x) |
+
+Both halves are at or below 1.0x by two workers: one spec run already occupies the machine, and a second
+competes with it rather than queueing behind it. Two plausible causes were tested and cleared — a shared
+Vite cache (workers reach the repository's cache through the `node_modules` junction; isolating it made
+4x *worse*, 0.75x) and thread oversubscription (constraining Vitest to one thread per process was slower
+still). It stays behind `-Workers` because it is correct and would pay with cores to spare.
+
+That also settles the obvious scheduling idea, cheap-and-high-yield-first. It is sound in general and it
+does not apply here: **a mutation check has no early exit**, so all 112 verdicts are required whatever the
+order. Ordering only pays by feeding a parallel scheduler, and the scheduler has nothing to give.
+
+Of the 17.5 minutes the browser half takes, roughly 3 are structural per-mutant overhead — a ~2.2s build
+and a ~3.2s Playwright invocation floor. The build cannot be dropped, since the browser suite is served
+`dist/` and that build *is* the mechanism by which a source mutation reaches a test; the floor would need a
+browser held open across mutants, which Playwright's runner does not expose for a bundle that changes
+between runs. The rest is test execution that has to happen.
+
+Two further ideas were measured and rejected: `--bail=1` for the unit half (the analogue of the flag above)
+is **2.3x slower**, and a single end-to-end serial-vs-parallel comparison is not a sufficient measurement —
+it is what produced the wrong reasoning this section previously carried.
 
 One caution when reading any of these numbers: this machine's wall clock drifts. The slowest mutant in the
 corpus measured 62.2s and later 97.4s on byte-identical code, and a full serial run measured 15.9 min and
