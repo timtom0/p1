@@ -565,7 +565,21 @@ function Invoke-Target([string] $target, [string] $label) {
     # `--mode=basic` would be wrong: the mutants are in source files, not CSS, so the CSS pipeline is
     # irrelevant, but the type check is deliberately *not* run -- a mutant that does not compile is still
     # a mutant, and the bundle should fail loudly in the browser rather than being silently skipped here.
+    #
+    # **The build's exit code is checked, and it was not checked for a long time.** A mutant that fails to
+    # compile leaves `dist/` holding the *previous*, unmutated bundle, and the browser suite then runs
+    # against clean source: the mutant passes, and it is recorded as a **survivor** -- a coverage gap
+    # invented by the harness. That is the same class as the "site not found" hole this script already
+    # guards, reached from the other direction, and it fails in the direction that looks like a finding
+    # rather than like a bug.
+    #
+    # No current mutant breaks compilation, so the guard changes no verdict today. It is here because the
+    # next one might, and because an unverified mutant reported as verified is the one outcome this tool
+    # must never produce by accident.
     $null = & $ViteBuild 'build'
+    if ($LASTEXITCODE -ne 0) {
+      throw "the production build failed for this mutant; dist/ still holds the previous (unmutated) bundle, so its verdict would be meaningless"
+    }
 
     # **Narrowed replay: the one change that made the browser half bearable.**
     #
