@@ -20,7 +20,7 @@
 
 import './styles.css';
 
-import type { Document, ShapeKind } from '../model/types';
+import type { Document, Page, ShapeKind } from '../model/types';
 import type { RestackDirection } from '../model/commands';
 import { arrangeTargets, canArrange } from '../model/arrange';
 import type { AlignMode, DistributeAxis } from '../model/arrange';
@@ -32,8 +32,9 @@ import {
   publishBootDiagnostics,
   recordBootStep,
 } from './boot-diagnostics';
-import { pageExtentPx } from '../model/page';
+import { pageExtentOf, pageExtents } from '../model/page';
 import { validateDocument } from '../model/invariants';
+import { pageSizesEqual } from '../model/page-setup';
 import { placementsInDocument } from '../model/tree';
 import { formatLength } from '../core/units/units';
 import type { PhysicalUnit, Unit } from '../core/units/units';
@@ -244,6 +245,46 @@ function main(): void {
     onChange: () => refreshChrome(),
   });
 
+  // --- page-size helpers (M20) ------------------------------------------------------------------------------------
+//
+// Pages carry their own dimensions, so three questions the UI used to answer from Document.pageSize
+// now need a page. All three are here rather than inline because each is a claim about the whole
+// document, and an inline version of any of them would be re-derived slightly differently at each
+// call site.
+
+/** The focused page, falling back to the first. undefined only for an empty document. */
+function firstPage(pages: readonly Page[]): Page | undefined {
+  return pages[viewport.focusedPageIndex] ?? pages[0];
+}
+
+/** `firstPage` narrowed to non-undefined, for the uniform case where there is certainly one. */
+function pageOf(pages: readonly Page[]): Page {
+  const page = firstPage(pages);
+  if (page === undefined) throw new Error('a document with no pages has no page size to report');
+  return page;
+}
+
+/**
+ * Whether every page carries the same dimensions.
+ *
+ * A *property of the values*, not a stored flag -- a document with equal sizes is uniform whichever
+ * route produced it, and one whose pages differ is mixed even if it was created as fixed-size.
+ */
+function uniformSizes(pages: readonly Page[]): boolean {
+  const first = pages[0];
+  if (first === undefined) return true;
+  return pages.every((page) => pageSizesEqual(page.size, first.size));
+}
+
+/**
+ * The unit for coordinate readouts: the focused page's own, falling back to the document default.
+ *
+ * Read live rather than cached because the focused page changes as the user moves through the stack,
+ * and in a mixed-unit document those values genuinely differ.
+ */
+function documentUnit(): PhysicalUnit {
+  return (firstPage(doc().pages) ?? { size: doc().pageSetup.defaultSize }).size.unit;
+}
   const rulers = new Rulers(
     {
       horizontal: queryRequired<HTMLCanvasElement>('[data-ruler-horizontal]'),
@@ -251,14 +292,14 @@ function main(): void {
       corner: queryRequired<HTMLElement>('[data-ruler-corner]'),
     },
     viewport,
-    { unit: doc().pageSize.unit as Unit },
+    { unit: documentUnit() as Unit },
   );
 
   const inspector = mountInspector(
     queryRequired<HTMLElement>('[data-inspector]'),
     editor,
     store,
-    () => doc().pageSize.unit as PhysicalUnit,
+    documentUnit,
   );
 
   /**
@@ -322,18 +363,21 @@ function main(): void {
       leaves: placementsInDocument(current).length,
     });
 
-    const page = pageExtentPx(current.pageSize);
     viewport.setContent(
-      {
-        pageWidth: page.width,
-        pageHeight: page.height,
-        pageCount: current.pages.length,
+  {
+    // Every page's own extent, in order. M20: the viewport sums heights and walks pages rather
+    // than multiplying one height by a count, because a mixed-size stack has no single height.
+    pages: pageExtents(current.pages),
       },
       PAGE_GAP,
     );
 
-    stackStat.textContent =
-      `${current.pages.length}× ${current.pageSize.width}×${current.pageSize.height} ${current.pageSize.unit}`;
+    // Says "mixed" rather than naming one page's paper, because a stack whose pages differ has no
+    // single size to report. Printing the first page's dimensions here would be exactly the quiet lie this
+    // milestone exists to remove: chrome claiming A4 for a document that prints half of it.
+    stackStat.textContent = uniformSizes(current.pages)
+      ? `${current.pages.length}× ${pageOf(current.pages).size.width}×${pageOf(current.pages).size.height} ${pageOf(current.pages).size.unit}` 
+      : `${current.pages.length}× mixed sizes`;
     // Leaves, not `page.objects.length`. A group has no visual form of its own, so counting it as an
     // object would report "3 objects" for a page holding two shapes inside one group -- and the
     // number is a *document* statement ("how much is in here"), which a container is not. The
@@ -427,7 +471,7 @@ function main(): void {
     // projection -- and it writes only a `<style>` element, never the model, so this cannot dirty
     // anything. Page size is not authorable in the UI; it arrives from the file or a new document,
     // which is exactly the case that would otherwise leave a stale sheet size behind.
-    applyPrintProfile(store.state.pageSize);
+    applyPrintProfile(store.state.pages.map((page) => page.size));
   });
 
   /**
@@ -517,7 +561,7 @@ function main(): void {
   project();
   // The store subscription only fires on *change*, so the print profile needs seeding here or the
   // first Export PDF would publish a page size belonging to whichever document was open before.
-  applyPrintProfile(store.state.pageSize);
+  applyPrintProfile(store.state.pages.map((page) => page.size));
   recordBootStep('viewport.fit:enter');
   viewport.fit();
   recordBootStep('viewport.fit:return');
@@ -665,8 +709,8 @@ function main(): void {
     // than refusing the insert.
     const focused = pages[viewport.focusedPageIndex];
     if (focused === undefined) return null;
-    const size = pageExtentPx(doc().pageSize);
-    return { pageId: focused.id, at: { x: size.width / 2, y: size.height / 2 } };
+    const size = pageExtentOf(focused);
+  return { pageId: focused.id, at: { x: size.width / 2, y: size.height / 2 } };
   }
 
   /**
@@ -727,7 +771,7 @@ function main(): void {
   // are separate spaces: it shows the page-local document position, while the
   // viewport internally works in client and stack coordinates.
   viewportRoot.addEventListener('pointermove', (event) => {
-    const unit = doc().pageSize.unit as Unit;
+    const unit = documentUnit() as Unit;
     const client = { x: event.clientX, y: event.clientY };
 
     // Classify first, then read coordinates. `pagePointFromClient` returns null for

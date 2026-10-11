@@ -33,6 +33,7 @@
  */
 
 import type { Vec2 } from '../../core/geom/mat2d';
+import { pageIndexAt, pageOffsetY } from '../../model/page';
 import { clamp } from './clamp';
 
 export interface ViewportElements {
@@ -66,17 +67,24 @@ export interface ViewportOptions {
 /**
  * Document geometry the viewport needs.
  *
- * Note there is no `height`: the stack's height is *derived* here from
- * `pageCount`, `pageHeight` and the viewport's own gap, because the viewport owns
- * the gap. Accepting a precomputed height would mean two sources of truth for the
- * same value, and changing the gap would silently invalidate it.
+ * ## Every page's extent, not one page's
+ *
+ * Before M20 this was `{ pageWidth, pageHeight, pageCount }` — one width, one height, a count, and the
+ * arithmetic was a multiplication. Page sizes are per-page now, so a page's top offset is a running
+ * sum of the heights before it, `pageIndexAt` is a walk rather than a division, and "fit to page"
+ * needs *that* page's box rather than the document's.
+ *
+ * The stack's extent is still derived here rather than passed in, and for the same reason as before:
+ * the viewport owns the gap, so accepting a precomputed height would give one value two sources and
+ * changing the gap would silently invalidate it.
+ *
+ * Pages are given as a flat list of extents rather than as `Page` values, so this file keeps no
+ * dependency on the document model beyond the numbers it is handed — which is what lets its own tests
+ * exercise the geometry with arrays rather than fixture documents.
  */
 export interface ViewportContent {
-  /** Page box width in document px. The stack is one page wide. */
-  pageWidth: number;
-  /** Page box height in document px. */
-  pageHeight: number;
-  pageCount: number;
+  /** Each page's box in document px, in document order. Empty for an empty document. */
+  readonly pages: readonly { readonly width: number; readonly height: number }[];
 }
 
 /**
@@ -116,29 +124,37 @@ export class Viewport {
   private readonly fitPadding: number;
   private readonly onChange: (state: ViewportState) => void;
 
-  private content: ViewportContent = {
-    pageWidth: 0,
-    pageHeight: 0,
-    pageCount: 0,
-  };
+  private content: ViewportContent = { pages: [] };
 
   /**
-   * Total stack size in document px, derived from the page box, page count and the
+   * Total stack size in document px, derived from the page boxes, page count and the
    * current gap. Single source of truth for the spacer size.
    *
    * Accepting a precomputed height was a bug in M1's first cut: changing the gap
    * then resized the spacer from a stale value, so the scroll extent no longer
    * matched the pages.
+   *
+   * Width is the **widest** page, not the first. The stack is a column, so one wide page among narrow
+   * ones must size the spacer or its horizontal scroll extent would be wrong.
    */
   private stackWidth(): number {
-    return this.content.pageWidth;
+    let width = 0;
+    for (const page of this.content.pages) if (page.width > width) width = page.width;
+    return width;
   }
 
   private stackHeight(): number {
-    const { pageHeight, pageCount } = this.content;
-    if (pageCount === 0) return 0;
+    const { pages } = this.content;
+    if (pages.length === 0) return 0;
+    let height = 0;
+    for (const page of pages) height += page.height;
     // n pages have n-1 gaps.
-    return pageCount * pageHeight + (pageCount - 1) * this.gap;
+    return height + (pages.length - 1) * this.gap;
+  }
+
+  /** Each page's height in document px, in order. The input to the model's offset arithmetic. */
+  private pageHeights(): number[] {
+    return this.content.pages.map((page) => page.height);
   }
 
   private currentZoom = 1;
@@ -275,13 +291,18 @@ export class Viewport {
     const clamped = this.clampPageIndex(index);
     if (clamped === null) return;
 
-    const { width, height } = this.viewportSize();
-    if (width <= 0 || height <= 0 || this.content.pageWidth <= 0) return;
+    const page = this.content.pages[clamped];
+    if (page === undefined) return;
 
+    const { width, height } = this.viewportSize();
+    if (width <= 0 || height <= 0 || page.width <= 0) return;
+
+    // **This page's** box, not the document's. A landscape page among portrait ones fits very
+    // differently, and fitting it against a portrait size would crop it.
     const zoom = clamp(
       Math.min(
-        (width - this.fitPadding * 2) / this.content.pageWidth,
-        (height - this.fitPadding * 2) / this.content.pageHeight,
+        (width - this.fitPadding * 2) / page.width,
+        (height - this.fitPadding * 2) / page.height,
       ),
       this.minZoom,
       this.maxZoom,
@@ -337,8 +358,10 @@ export class Viewport {
     if (clamped === null) return;
 
     const zoom = this.currentZoom;
-    const pageTop = this.pageOffsetY(clamped) * zoom;
-    const pageBottom = pageTop + this.content.pageHeight * zoom;
+    const heights = this.pageHeights();
+    const pageTop = pageOffsetY(clamped, heights, this.gap) * zoom;
+    const pageHeight = heights[clamped] ?? 0;
+    const pageBottom = pageTop + pageHeight * zoom;
     const viewHeight = this.viewportSize().height;
 
     // Already fully visible: leave the scroll alone, so repeated calls do not
@@ -411,19 +434,12 @@ export class Viewport {
 
   /** Which page contains a stack y offset, or `null` if it falls in a gap or past the end. */
   pageIndexAt(stackY: number): number | null {
-    const { pageHeight, pageCount } = this.content;
-    if (pageCount === 0 || stackY < 0) return null;
-    const stride = pageHeight + this.gap;
-    const index = Math.floor(stackY / stride);
-    if (index >= pageCount) return null;
-    // Inside the inter-page gap rather than on a page.
-    if (stackY - index * stride >= pageHeight) return null;
-    return index;
+    return pageIndexAt(stackY, this.pageHeights(), this.gap);
   }
 
   /** Stack y offset of a page's top edge, in document px. */
   pageOffsetY(index: number): number {
-    return index * (this.content.pageHeight + this.gap);
+    return pageOffsetY(index, this.pageHeights(), this.gap);
   }
 
   /** Zoom clamped to the allowed range. Exposed for UI that previews a level. */
@@ -523,8 +539,8 @@ export class Viewport {
   }
 
   private clampPageIndex(index: number): number | null {
-    if (this.content.pageCount === 0) return null;
-    return Math.min(Math.max(index, 0), this.content.pageCount - 1);
+    if (this.content.pages.length === 0) return null;
+    return Math.min(Math.max(index, 0), this.content.pages.length - 1);
   }
 
   private viewportCentreClient(): Vec2 {

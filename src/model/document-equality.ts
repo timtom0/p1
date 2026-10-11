@@ -48,6 +48,7 @@ import type {
   TextStyle,
   Transform2D,
 } from './types';
+import { pageSizesEqual, type PageSetup } from './page-setup';
 
 /** Whether two documents are the same document. */
 export function documentsEqual(a: Document, b: Document): boolean {
@@ -55,7 +56,7 @@ export function documentsEqual(a: Document, b: Document): boolean {
   if (a.formatVersion !== b.formatVersion) return false;
   if (a.id !== b.id) return false;
   if (a.name !== b.name) return false;
-  if (!pageSizesEqual(a.pageSize, b.pageSize)) return false;
+  if (!pageSetupsEqual(a.pageSetup, b.pageSetup)) return false;
   // A document with no asset table is not equal to one with an empty table, so this is a
   // real comparison and not a defaulted one -- see `assetsEqual`.
   const leftAssets = a.assets;
@@ -77,17 +78,24 @@ export function documentsEqual(a: Document, b: Document): boolean {
   return true;
 }
 
-function pageSizesEqual(a: Document['pageSize'], b: Document['pageSize']): boolean {
-  return (
-    a.width === b.width &&
-    a.height === b.height &&
-    a.unit === b.unit &&
-    a.orientation === b.orientation
-  );
+/**
+ * The document's page-setup fields.
+ *
+ * Part of the document, therefore part of equality: two documents that differ only in the default
+ * size for their *next* page are different documents, and a round-trip test that ignored this would
+ * pass while the setup silently reverted to A4.
+ */
+function pageSetupsEqual(a: PageSetup, b: PageSetup): boolean {
+  if (a.fixedSize !== b.fixedSize) return false;
+  if (a.resizeBehaviour !== b.resizeBehaviour) return false;
+  return pageSizesEqual(a.defaultSize, b.defaultSize);
 }
 
 function pagesEqual(a: Page, b: Page): boolean {
   if (a.id !== b.id || a.name !== b.name) return false;
+  // Per-page since M20. Two pages that differ only in size are different pages, which is precisely
+  // the case a document-wide size could not represent.
+  if (!pageSizesEqual(a.size, b.size)) return false;
   if (!paintsEqual(a.background, b.background)) return false;
   // Reference equality first. `documentsEqual` runs on every pointer move during a drag, and a page
   // whose `objects` array is *the same array* cannot have changed contents by any route that does

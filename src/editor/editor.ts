@@ -58,7 +58,7 @@ import {
 import { createId } from '../core/ids';
 import { createTransform } from '../model/factory';
 import { localMatrix, paintedBounds } from '../model/transform';
-import { pageExtentPx } from '../model/page';
+import { pageExtentOf } from '../model/page';
 import { shapeLabel } from '../model/shapes';
 import { creationIndex, creationRect, createShapeFor, imagePlacementRect } from '../model/creation';
 import { describeCommand } from '../model/commands';
@@ -605,7 +605,9 @@ export class Editor {
     const box = imagePlacementRect(
       { width: input.intrinsicWidth, height: input.intrinsicHeight },
       input.at,
-      pageExtentPx(this.doc.pageSize),
+      // **The page being dropped onto**, not the document. With mixed page sizes these differ, and
+      // fitting an image to the document's paper would place it outside the page it is on.
+      pageExtentOf(page),
     );
 
     const node: ImageNode = {
@@ -1419,15 +1421,17 @@ export class Editor {
       .map((id) => pageIdOfNode(this.doc, id))
       .find((id): id is string => typeof id === 'string');
     if (pageId === undefined) return null;
-    // The page's own size is a **document** property, so the page-edge candidates come from `this.doc`.
-    // Page geometry is identical on every page in M17 -- there is no per-page size yet -- and using the
-    // document's is the only reading available without inventing one.
-    if (this.doc.pages.find((candidate) => candidate.id === pageId) === undefined) return null;
+    // The page's own size. This used to be `this.doc.pageSize` with a comment explaining that no
+    // per-page size existed; M20 added one, so the snap rectangle is now the page the selection is
+    // **on** rather than the document. In a mixed-size document those differ, and snapping an object
+    // to the edges of a page it is not on is worse than not snapping at all.
+    const page = this.doc.pages.find((candidate) => candidate.id === pageId);
+    if (page === undefined) return null;
 
     return computeSnap({
       moving,
       pageId,
-      pageRect: pageSnapRect({ pageSize: this.doc.pageSize }),
+      pageRect: pageSnapRect({ pageSize: page.size }),
       // Excluding the selection by id is also what prevents self-snapping, and it removes a selected
       // group's contents too, since a selection never contains both a node and one of its descendants.
       others: snapTargetsFor(this.doc, start.keys()),

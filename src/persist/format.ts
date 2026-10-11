@@ -82,6 +82,23 @@ export { CURRENT_FORMAT_VERSION } from '../model/factory';
  * convert, no field to default, and no authored content at risk. Accepting 1 is not "reading an old
  * format"; it is "reading this format, written before groups existed".
  *
+ * **M20 changed that, and this paragraph was corrected rather than left standing.**
+ *
+ * Version 3 moves the page size from `Document.pageSize` onto `Page.size` and adds
+ * `Document.pageSetup`. A version-1 or -2 file has *no* per-page size -- it has one document size
+ * that every page inherited. Reading one therefore means deriving each page's `size` from
+ * `pageSize`, and deriving a field the file does not contain is a migration whatever it is called.
+ *
+ * So ADR 0007's "no migrations" was never a principle about difficulty. It was a *description* of
+ * the situation, true while every accepted version was a strict subset of the current one, which
+ * stopped being the case the moment a field moved rather than appeared. ADR 0019 §4 records the
+ * change and why refusing versions 1 and 2 outright was rejected: it would make every document this
+ * editor has ever written unloadable.
+ *
+ * What has deliberately **not** changed is the refusal direction. A version-3 file opened by a
+ * version-2 build still fails loudly on the unknown `pageSetup` key rather than loading a document
+ * whose pages it would then draw at the wrong size.
+ *
  * What does change: opening a version-1 file and saving it stamps `formatVersion: 2`. That is a
  * version bump and nothing else, which is the entire difference, and it is why the golden fixtures
  * are re-stamped rather than regenerated.
@@ -124,7 +141,25 @@ export class DocumentParseError extends Error {
 // The shape, stated once
 // ---------------------------------------------------------------------------
 
+/**
+ * The document's top-level keys, **since version 3**.
+ *
+ * `pageSetup` replaced `pageSize` in M20, so the key list is version-dependent and this is no longer
+ * one constant. {@link documentKeysFor} is what `deserialize` actually calls; the two named lists
+ * exist so the difference is stated once and cannot drift.
+ */
 export const DOCUMENT_KEYS = [
+  'format',
+  'formatVersion',
+  'id',
+  'name',
+  'pageSetup',
+  'assets',
+  'pages',
+] as const;
+
+/** Versions 1 and 2: one `pageSize` for the whole document, and no per-page size. */
+export const LEGACY_DOCUMENT_KEYS = [
   'format',
   'formatVersion',
   'id',
@@ -134,9 +169,36 @@ export const DOCUMENT_KEYS = [
   'pages',
 ] as const;
 
+/**
+ * The key list a document of `version` is allowed to carry.
+ *
+ * The whole of the version-3 distinction, and the reason `deserialize` can no longer simply call
+ * `expectOnlyKeys(root, '', DOCUMENT_KEYS)`: a legacy file's `pageSize` is not an unknown field to be
+ * rejected, it is **the only place its page sizes exist**, and rejecting it would refuse every
+ * document written before this milestone.
+ */
+export function documentKeysFor(version: number): readonly string[] {
+  return version >= 3 ? DOCUMENT_KEYS : LEGACY_DOCUMENT_KEYS;
+}
+
 export const PAGE_SIZE_KEYS = ['width', 'height', 'unit', 'orientation'] as const;
 
-export const PAGE_KEYS = ['id', 'name', 'background', 'objects'] as const;
+/** The document's page-setup keys. Version 3 and later only. */
+export const PAGE_SETUP_KEYS = ['fixedSize', 'defaultSize', 'resizeBehaviour'] as const;
+
+export const PAGE_KEYS = ['id', 'name', 'size', 'background', 'objects'] as const;
+
+/**
+ * Versions 1 and 2: a page carried no `size`, so its dimensions were the document's.
+ *
+ * Read as "the keys a page may have", which for a legacy page is strictly fewer. `deserialize` calls
+ * {@link pageKeysFor} for the same reason it calls {@link documentKeysFor}.
+ */
+export const LEGACY_PAGE_KEYS = ['id', 'name', 'background', 'objects'] as const;
+
+export function pageKeysFor(version: number): readonly string[] {
+  return version >= 3 ? PAGE_KEYS : LEGACY_PAGE_KEYS;
+}
 
 export const ASSET_RECORD_KEYS = [
   'kind',

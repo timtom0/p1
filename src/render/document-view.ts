@@ -24,7 +24,8 @@
 import type { Document, Node } from '../model/types';
 import type { NodePlacement } from '../model/tree';
 import { placementsOnPage } from '../model/tree';
-import { pageExtentPx, pageOffsetY } from '../model/page';
+import { pageExtents, pageOffsetY, printPageName } from '../model/page';
+
 import { applyPageGeometry } from './layers/page';
 import { ObjectTypeRegistry, Reconciler } from './reconciler';
 import { createRenderContext } from './render-context';
@@ -203,13 +204,24 @@ export class DocumentView {
 
     this.syncPages(doc, gap);
 
+    // One pass over the pages' sizes, shared by the offset loop and by `syncPages`. Before M20 this
+    // was a single `pageExtentPx(doc.pageSize)` hoisted out of the loop; with per-page sizes there is
+    // no single value to hoist, and computing it inside the loop would be O(n^2) in page count.
+    const heights = pageExtents(doc.pages).map((extent) => extent.height);
+
     for (const [index, page] of doc.pages.entries()) {
       const objects = this.objectContainers.get(page.id);
       const pageElement = this.pageElements.get(page.id);
       if (objects === undefined || pageElement === undefined) continue;
 
-      applyPageGeometry(pageElement, doc, page);
-      pageElement.style.top = `${pageOffsetY(index, doc.pages.length, pageHeight(doc), gap)}px`;
+      applyPageGeometry(pageElement, page);
+      pageElement.style.top = `${pageOffsetY(index, heights, gap)}px`;
+      // Bind this element to its own sheet. `@page` cannot vary per element without CSS *named*
+      // pages, and a mixed-size document printed against a single rule prints every page at the first
+      // page's size. The name is the page's **index**, because the print profile numbers its rules by
+      // index too -- so the two agree by construction rather than by a shared id that a reorder could
+      // desynchronise.
+      pageElement.style.page = printPageName(index);
       // Groups are flattened here and nowhere else. A group's transform becomes part of
       // each descendant's placement, and its position in the page's `objects` array becomes the
       // position its children occupy in the flat list -- so `A, Group[B, C], D` renders as
@@ -244,7 +256,7 @@ export class DocumentView {
   }
 
   private syncPages(doc: Document, gap: number): void {
-    const height = pageHeight(doc);
+    const heights = pageExtents(doc.pages).map((extent) => extent.height);
     const seen = new Set<string>();
 
     for (const [index, page] of doc.pages.entries()) {
@@ -269,8 +281,8 @@ export class DocumentView {
         this.elements.pages.append(pageElement);
       }
 
-      pageElement.style.top = `${pageOffsetY(index, doc.pages.length, height, gap)}px`;
-      applyPageGeometry(pageElement, doc, page);
+      pageElement.style.top = `${pageOffsetY(index, heights, gap)}px`;
+      applyPageGeometry(pageElement, page);
     }
 
     for (const [id, element] of this.pageElements) {
@@ -322,6 +334,3 @@ export class DocumentView {
   }
 }
 
-function pageHeight(doc: Document): number {
-  return pageExtentPx(doc.pageSize).height;
-}

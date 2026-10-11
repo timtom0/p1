@@ -70,7 +70,14 @@ export function serialize(doc: Document): PersistedDocument {
     formatVersion: CURRENT_FORMAT_VERSION,
     id: doc.id,
     name: doc.name,
-    pageSize: canonicalPageSize(doc.pageSize),
+    pageSetup: {
+      fixedSize: doc.pageSetup.fixedSize,
+      resizeBehaviour: doc.pageSetup.resizeBehaviour,
+      // Key order is the persisted order, so `defaultSize` sits where the reader expects it and two
+      // equal setups emit identically. It is written after the two scalars to match the interface's
+      // own declaration order in `page-setup.ts`.
+      defaultSize: canonicalPageSize(doc.pageSetup.defaultSize),
+    },
     assets: canonicalAssets(doc.assets),
     pages: doc.pages.map(canonicalPage),
   };
@@ -136,6 +143,10 @@ function canonicalPage(page: Page): Page {
   return {
     id: page.id,
     name: page.name,
+    // Per-page since M20. This single line is the format change: every page now carries its own
+    // dimensions, so the file states the paper of each sheet rather than one size the whole document
+    // inherits. `PAGE_KEYS` declares it and `deserialize` requires it.
+    size: canonicalPageSize(page.size),
     background: canonicalPaint(page.background),
     objects: page.objects.map(canonicalNode),
   };

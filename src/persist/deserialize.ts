@@ -66,12 +66,13 @@ import {
   CHAR_FLAGS,
   CURRENT_FORMAT_VERSION,
   DOCUMENT_FORMAT,
-  DOCUMENT_KEYS,
+  documentKeysFor,
   DocumentParseError,
   GROUP_NODE_KEYS,
   MINIMUM_FORMAT_VERSION,
   ORIENTATIONS,
-  PAGE_KEYS,
+  PAGE_SETUP_KEYS,
+  pageKeysFor,
   PAGE_SIZE_KEYS,
   PAINT_KEYS,
   PARAGRAPH_ALIGNS,
@@ -99,6 +100,13 @@ import {
   expectString,
 } from './format';
 import { validateDocument } from '../model/invariants';
+import {
+  clonePageSize,
+  createPageSetup,
+  pageSizeProblem,
+  PAGE_RESIZE_BEHAVIOURS,
+  type PageSetup,
+} from '../model/page-setup';
 
 /**
  * Reads a persisted document, or throws.
@@ -110,11 +118,14 @@ import { validateDocument } from '../model/invariants';
  */
 export function parse(input: unknown): Document {
   const root = expectRecord(input, '');
-  expectOnlyKeys(root, '', DOCUMENT_KEYS);
   assertFormatMarker(root['format']);
-  assertVersion(root['formatVersion']);
+  // **Version first**, because the version decides which keys are legal. `expectOnlyKeys` before this
+  // would have rejected every pre-M20 file on its `pageSize`, which is the only place its page
+  // dimensions exist — it is the data being migrated, not an unknown field.
+  const version = assertVersion(root['formatVersion']);
+  expectOnlyKeys(root, '', documentKeysFor(version));
 
-  const doc = parseDocument(root);
+  const doc = parseDocument(root, version);
   assertDocumentIsConsistent(doc);
 
   reserveIds(collectIds(doc));
@@ -164,7 +175,14 @@ function assertFormatMarker(input: unknown): void {
   }
 }
 
-function assertVersion(input: unknown): void {
+/**
+ * Returns the accepted version, having refused the two directions that cannot be read.
+ *
+ * The return value exists because M20 made the version load-bearing: {@link parse} uses it to choose
+ * which keys are legal and {@link parseDocument} uses it to decide whether to migrate. Before this,
+ * the accepted range was checked and then discarded.
+ */
+function assertVersion(input: unknown): number {
   const version = expectNumber(input, 'formatVersion');
   if (!Number.isInteger(version)) {
     throw new DocumentParseError('formatVersion', 'must be an integer');
@@ -179,30 +197,26 @@ function assertVersion(input: unknown): void {
     );
   }
   if (version < MINIMUM_FORMAT_VERSION) {
-    // No migrations exist, by design (ADR 0007 §4). The two directions get different
-    // messages because they need different actions from the user.
+    // The two directions get different messages because they need different actions from the user.
     //
-    // The lower bound is 1, and it is *not* "no older files accepted": version 1 falls through
-    // this check and is read normally. Only a file older than 1 is refused, and for it there is
-    // genuinely nothing to migrate from. ADR 0012 §7.
+    // The lower bound is 1, and it is *not* "no older files accepted": version 1 and version 2 both
+    // fall through this check and are read normally -- the latter through the per-page size migration
+    // in `parseDocument`. Only a file older than 1 is refused, and for it there is genuinely nothing
+    // to migrate from.
     throw new DocumentParseError(
       'formatVersion',
       `saved by an older version of P1 (this file is ${version}, this build reads ` +
         `${MINIMUM_FORMAT_VERSION}-${CURRENT_FORMAT_VERSION}); there is no migration for it`,
     );
   }
-  // `MINIMUM_FORMAT_VERSION <= version <= CURRENT_FORMAT_VERSION` is accepted, and the parser
-  // produces a document stamped with `CURRENT_FORMAT_VERSION`.
+  // Accepted, and the parser produces a document stamped with `CURRENT_FORMAT_VERSION`.
   //
-  // That stamp is the *only* difference between reading version 1 and version 2, and it is
-  // deliberate rather than incidental: a version-1 document has no groups, so there is nothing to
-  // convert, and re-stamping it says "this is now written in the current format" without altering
-  // a single authored value. It is not a migration (ADR 0007 §4) because no authored content
-  // changes; it is a re-stamp.
-  //
-  // A version-2 document containing a group is **not** silently interpreted by an older build --
-  // that build stops at the version check above. And a version-1 document cannot contain a group at
-  // all, because `expectOnlyKeys` rejects the unknown `type` at a named path.
+  // For version 1 that stamp was the *only* difference, because a version-1 document has no groups:
+  // nothing to convert, and re-stamping says "now written in the current format" without altering an
+  // authored value. For version 2 the stamp comes **with** a change — every page gains the `size`
+  // the document used to imply — and that is a migration rather than a re-stamp. See ADR 0019 §4 and
+  // the correction above `MINIMUM_FORMAT_VERSION`.
+  return version;
 }
 
 /**
@@ -279,27 +293,95 @@ function assertAssetReferences(
 // Fields
 // ---------------------------------------------------------------------------
 
-function parseDocument(root: Record<string, unknown>): Document {
+/**
+ * Builds the document, migrating a legacy one if that is what this is.
+ *
+ * ## The M20 migration, in full
+ *
+ * A version-1 or version-2 file has `Document.pageSize` and no `Page.size`. The dimensions those
+ * pages had are exactly the document's, so the migration is to **copy** it onto every page rather
+ * than to guess or to default: the pages were already that size, and recording the size they
+ * already were is the only version of this that preserves appearance.
+ *
+ * Three decisions worth stating, because each had a plausible alternative:
+ *
+ *  - **`fixedSize: true`.** A legacy document was, by construction, uniform — there was no way for it
+ *    to be otherwise. So "every page matches the default" is a *fact about the file*, not an
+ *    assumption, and `true` reproduces the only behaviour that document could have had. `false` would
+ *    mean the same thing for existing pages and differ only for the next page added, where it would
+ *    be a silent behaviour change nobody asked for.
+ *  - **`resizeBehaviour: 'crop'`.** The default, and the only option that moves no content.
+ *  - **The size is copied, not shared.** Every page gets its own object. A shared reference would be
+ *    cheaper and would make resizing one page of a uniform document resize all of them — reintroducing
+ *    exactly the document-wide coupling M20 removed, one indirection away.
+ */
+function parseDocument(root: Record<string, unknown>, version: number): Document {
+  const id = expectId(root['id'], 'id');
+  const name = expectString(root['name'], 'name');
+
+  if (version >= 3) {
+    return {
+      formatVersion: CURRENT_FORMAT_VERSION,
+      id,
+      name,
+      pageSetup: parsePageSetup(root['pageSetup']),
+      assets: parseAssets(root['assets']),
+      pages: parsePages(root['pages'], version),
+    };
+  }
+
+  const legacySize = parsePageSize(root['pageSize'], 'pageSize');
   return {
     formatVersion: CURRENT_FORMAT_VERSION,
-    id: expectId(root['id'], 'id'),
-    name: expectString(root['name'], 'name'),
-    pageSize: parsePageSize(root['pageSize']),
+    id,
+    name,
+    pageSetup: createPageSetup({
+      fixedSize: true,
+      defaultSize: clonePageSize(legacySize),
+      resizeBehaviour: 'crop',
+    }),
     assets: parseAssets(root['assets']),
-    pages: parsePages(root['pages']),
+    // `parsePages` passes the inherited size down, so the page list itself has no version branch.
+    pages: parsePages(root['pages'], version, legacySize),
   };
 }
 
-function parsePageSize(input: unknown): PageSize {
-  const record = expectRecord(input, 'pageSize');
-  expectOnlyKeys(record, 'pageSize', PAGE_SIZE_KEYS);
-  return {
-    width: expectPositiveNumber(record['width'], 'pageSize.width'),
-    height: expectPositiveNumber(record['height'], 'pageSize.height'),
-    unit: expectPhysicalUnit(record['unit'], 'pageSize.unit'),
-    orientation: expectEnum(record['orientation'], 'pageSize.orientation', ORIENTATIONS) as
-      Orientation,
+function parsePageSetup(input: unknown): PageSetup {
+  const record = expectRecord(input, 'pageSetup');
+  expectOnlyKeys(record, 'pageSetup', PAGE_SETUP_KEYS);
+  const resizeBehaviour = expectEnum(
+    record['resizeBehaviour'],
+    'pageSetup.resizeBehaviour',
+    PAGE_RESIZE_BEHAVIOURS,
+  );
+  return createPageSetup({
+    fixedSize: expectBoolean(record['fixedSize'], 'pageSetup.fixedSize'),
+    defaultSize: parsePageSize(record['defaultSize'], 'pageSetup.defaultSize'),
+    resizeBehaviour,
+  });
+}
+
+/**
+ * Reads a page size, then applies the model's own bounds.
+ *
+ * `expectPositiveNumber` is kept because it is the rule that was already here and it names the
+ * failure precisely; {@link pageSizeProblem} adds the *range*, which a document 0.01mm across would
+ * otherwise pass and then render as nothing.
+ */
+function parsePageSize(input: unknown, path: string): PageSize {
+  const record = expectRecord(input, path);
+  expectOnlyKeys(record, path, PAGE_SIZE_KEYS);
+  const size: PageSize = {
+    width: expectPositiveNumber(record['width'], `${path}.width`),
+    height: expectPositiveNumber(record['height'], `${path}.height`),
+    unit: expectPhysicalUnit(record['unit'], `${path}.unit`),
+    orientation: expectEnum(record['orientation'], `${path}.orientation`, ORIENTATIONS) as Orientation,
   };
+  const problem = pageSizeProblem(size);
+  if (problem !== null) {
+    throw new DocumentParseError(path, problem);
+  }
+  return size;
 }
 
 function parseAssets(input: unknown): Record<AssetId, AssetRecord> {
@@ -362,21 +444,28 @@ function parseAssetData(input: unknown, path: string): AssetData {
   return { external: expectString(record['external'], `${path}.external`) };
 }
 
-function parsePages(input: unknown): Page[] {
+function parsePages(input: unknown, version: number, inheritedSize?: PageSize): Page[] {
   const list = expectArray(input, 'pages');
   if (list.length === 0) {
     throw new DocumentParseError('pages', 'a document has at least one page');
   }
-  return list.map((page, index) => parsePage(page, `pages[${index}]`));
+  return list.map((page, index) => parsePage(page, `pages[${index}]`, version, inheritedSize));
 }
 
-function parsePage(input: unknown, path: string): Page {
+function parsePage(input: unknown, path: string, version: number, inheritedSize?: PageSize): Page {
   const record = expectRecord(input, path);
-  expectOnlyKeys(record, path, PAGE_KEYS);
+  expectOnlyKeys(record, path, pageKeysFor(version));
   const objects = expectArray(record['objects'], `${path}.objects`);
   return {
     id: expectId(record['id'], `${path}.id`),
     name: expectString(record['name'], `${path}.name`),
+    // A version-3 page must state its own size; a legacy page takes the document's. Both branches
+    // end with a `size`, because the `Document` this parser returns is a version-3 document and every
+    // page in it has a size.
+    size:
+      version >= 3
+        ? parsePageSize(record['size'], `${path}.size`)
+        : clonePageSize(inheritedSize ?? parsePageSize(record['size'], `${path}.size`)),
     background: parsePaint(record['background'], `${path}.background`),
     objects: objects.map((node, index) => parseNode(node, `${path}.objects[${index}]`)),
   };

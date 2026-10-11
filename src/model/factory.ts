@@ -5,11 +5,19 @@
  */
 
 import { createId } from '../core/ids';
+import {
+  clonePageSize,
+  createPageSetup,
+  DEFAULT_PAGE_PRESET,
+  type PageResizeBehaviour,
+  type PageSetup,
+} from './page-setup';
 import type {
   Document,
   GroupNode,
   Node,
   Page,
+  PageSize,
   RichText,
   ShapeGeometry,
   ShapeKind,
@@ -178,14 +186,46 @@ export function createTextFrameNode(
   };
 }
 
+/**
+ * Creates a page.
+ *
+ * `size` defaults to A4 portrait so a bare `createPage()` still produces a usable sheet — but the
+ * document is what normally decides, via `sizeForNewPage`, and callers creating pages inside a
+ * document should pass the result of that rather than relying on this default.
+ */
 export function createPage(init: Partial<Omit<Page, 'id'>> = {}): Page {
   return {
     id: createId('page'),
     name: 'Page 1',
+    size: clonePageSize(DEFAULT_PAGE_PRESET.size),
     background: { type: 'solid', color: '#ffffff' },
     objects: [],
     ...init,
   };
+}
+
+/**
+ * The document-setup options a caller can pass to {@link createDocument}.
+ *
+ * A named type rather than an inline object because the setup panel, the tests and the CLI-ish
+ * callers all need to build one, and three copies of `{ fixedSize, defaultSize, resizeBehaviour }`
+ * would drift.
+ */
+export interface CreateDocumentOptions extends Partial<Omit<Document, 'id' | 'pages' | 'pageSetup'>> {
+  pages?: Page[];
+  /** Shorthand for `pageSetup.defaultSize`. Ignored when `pageSetup` is given. */
+  pageSize?: PageSize;
+  /** Shorthand for `pageSetup.fixedSize`. Ignored when `pageSetup` is given. */
+  fixedSize?: boolean;
+  /** Shorthand for `pageSetup.resizeBehaviour`. Ignored when `pageSetup` is given. */
+  resizeBehaviour?: PageResizeBehaviour;
+  /**
+   * When given, `pageSize`/`fixedSize`/`resizeBehaviour` are merged *under* it.
+   *
+   * The explicit `pageSetup` therefore wins on any field it sets, which is what a caller that has
+   * already read the setup expects.
+   */
+  pageSetup?: PageSetup;
 }
 
 /**
@@ -211,24 +251,54 @@ export function createPage(init: Partial<Omit<Page, 'id'>> = {}): Page {
  * So the single literal lives here, `persist/format.ts` imports it, and
  * `tests/persist/version-ownership.test.ts` asserts the two cannot drift. A layer rule that forces
  * a duplication is a reason to move the *constant*, not a reason to write it down twice.
+ *
+ * ## 3 since M20, and here is the argument (ADR 0019 §4)
+ *
+ * Version 3 removes `Document.pageSize` and adds `Page.size` plus `Document.pageSetup`. That is a
+ * **field move**, not an added union arm: a version-2 build reading a version-3 file would reject it
+ * on the unknown `pageSetup` key, which is the rule the project wants rather than a migration it
+ * cannot avoid.
+ *
+ * Reading the other direction is where the change is not free, and the honest statement is in
+ * `persist/format.ts`: a version-1 or -2 file has one document size and no per-page size, so the
+ * parser must *derive* each page's size from the document's. That is a migration, and it is the
+ * first one this project has. ADR 0007 said "no migrations"; ADR 0019 §4 says that was true only
+ * while every previous version was a strict subset of the current one, and records why that stopped
+ * being so.
  */
-export const CURRENT_FORMAT_VERSION = 2;
+export const CURRENT_FORMAT_VERSION = 3;
 
-export function createDocument(init: Partial<Omit<Document, 'id' | 'pages'>> & {
-  pages?: Page[];
-} = {}): Document {
+export function createDocument(init: CreateDocumentOptions = {}): Document {
+  const { pageSize, fixedSize, resizeBehaviour, pageSetup, ...rest } = init;
+
+  // `pageSetup` is authoritative on any field it sets; the shorthands fill the gaps. Spreading the
+  // shorthands first and the explicit setup second means a caller who passes both gets what they
+  // wrote, rather than whichever the implementation happened to check first.
+  const setup = createPageSetup({
+    ...(fixedSize === undefined ? {} : { fixedSize }),
+    ...(resizeBehaviour === undefined ? {} : { resizeBehaviour }),
+    ...(pageSize === undefined ? {} : { defaultSize: pageSize }),
+    ...pageSetup,
+  });
+
+  // Pages get their size from the setup, so `createDocument({ pageSize })` and a document whose first
+  // page was added through the editor agree without either site restating the rule.
+  const pages =
+    init.pages?.map((page) => ({ ...page, size: clonePageSize(page.size ?? setup.defaultSize) })) ??
+    [createPage({ size: clonePageSize(setup.defaultSize) })];
+
   return {
     // Not a literal. See above.
     formatVersion: CURRENT_FORMAT_VERSION,
     id: createId('doc'),
     name: 'Untitled',
-    pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+    pageSetup: setup,
     // Empty by default rather than absent, so `Document.assets` needs no optional
     // handling anywhere -- including in a deserializer, where a missing field would
     // otherwise be a special case at every read site.
     assets: {},
-    ...init,
-    pages: init.pages ?? [createPage()],
+    ...rest,
+    pages,
   };
 }
 

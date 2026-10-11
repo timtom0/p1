@@ -7,6 +7,7 @@
  */
 
 import type { PhysicalUnit } from '../core/units/units';
+import type { PageSetup } from './page-setup';
 
 // ---------------------------------------------------------------------------
 // Geometry
@@ -423,6 +424,21 @@ export interface PageSize {
 export interface Page {
   id: string;
   name: string;
+  /**
+   * This page's own dimensions.
+   *
+   * **Required, on every page, always.** Before M20 the size lived once on `Document.pageSize` and
+   * every page inherited it, which made a document with two paper sizes unrepresentable — the model
+   * had exactly one place to put the answer. Moving it here is the whole change: there is no
+   * "shared" variant of `Page` and no document-wide fallback, so the renderer, the viewport,
+   * hit-testing and the print profile each read one page's own size and none of them branch on a
+   * mode. See ADR 0019.
+   *
+   * A document whose pages all happen to carry the same value is a *uniform* document, and that is a
+   * property of its values rather than a flag — which is why `Document` has `pageSetup` (a creation
+   * default) instead of a "these are all the same size" claim.
+   */
+  size: PageSize;
   background: Paint;
   /** Order is paint order: index 0 paints first (furthest back). */
   objects: Node[];
@@ -433,7 +449,14 @@ export interface Document {
   formatVersion: number;
   id: string;
   name: string;
-  pageSize: PageSize;
+  /**
+   * How new pages are sized and what a resize does to content.
+   *
+   * Replaces the document-wide `pageSize` of M0–M19. It is **not** a claim that every page shares a
+   * size — it records the default for the *next* page and the resize policy, both of which are
+   * authored, undoable, and must survive a round trip. See `model/page-setup.ts`.
+   */
+  pageSetup: PageSetup;
   /**
    * Every asset this document owns, by id.
    *
@@ -445,8 +468,8 @@ export interface Document {
    */
   assets: Record<AssetId, AssetRecord>;
   /**
-   * M0 renders the first page. Multi-page stacking, guides and grid arrive with their
-   * respective milestones; resources moved onto the document above in M6.
+   * At least one page; `validateDocument` rejects an empty stack. `Document.pageSize` did not live
+   * here before M20 because there was nothing per-page to store.
    */
   pages: Page[];
 }

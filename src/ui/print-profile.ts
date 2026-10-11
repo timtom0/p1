@@ -23,7 +23,8 @@
  * `8.5in 11in`. Nothing assumes A4, because A4 is a choice this editor does not make for you.
  */
 
-import { pageExtentPx } from '../model/page';
+import { pageExtentPx, printPageName } from '../model/page';
+
 import { formatLength } from '../core/units/units';
 import type { Document, PageSize } from '../model/types';
 
@@ -58,23 +59,47 @@ export function printSheetSize(size: PageSize): string {
   return `${formatLength(extent.width, size.unit, 4)} ${formatLength(extent.height, size.unit, 4)}`;
 }
 
-/** The injected stylesheet's text for a given page size. */
+/** The injected stylesheet's text for a single page size. Retained for the one-page case. */
 export function printProfileCss(size: PageSize): string {
-  // `margin: 0` is load-bearing twice over: it removes the browser's default page margin, and it is
-  // what makes "one document page per sheet" true rather than approximately true.
-  return `@page { size: ${printSheetSize(size)}; margin: 0; }`;
+  return namedPageProfileCss([size]);
 }
 
 /**
- * Writes the profile for `size` into the document, creating the element on first use.
+ * The injected stylesheet for a stack of pages.
+ *
+ * One `@page` rule per page, named by index, plus a bare `@page` carrying the **first** page's size.
+ * That last rule is the fallback: a page element whose `page` name did not match -- which should be
+ * impossible, and is asserted in the PDF test -- still prints at a sensible size rather than at the
+ * browser's default paper.
+ *
+ * Identical sizes are emitted once per page rather than de-duplicated by value. It is a few bytes of
+ * CSS, and it keeps the rule that fires for page *n* a function of *n* alone, with no equality test
+ * that a later change could get subtly wrong and turn a 40-page document into 40 sheets of the wrong
+ * paper.
+ */
+export function namedPageProfileCss(sizes: readonly PageSize[]): string {
+  const first = sizes[0];
+  const rules = sizes.map(
+    (size, index) => `@page ${printPageName(index)} { size: ${printSheetSize(size)}; margin: 0; }`,
+  );
+  // A document with no pages is not representable (`validateDocument` refuses it), but this function
+  // must still return valid CSS rather than emitting a rule with an empty size.
+  rules.push(`@page { size: ${printSheetSize(first ?? FALLBACK_PAGE_SIZE)}; margin: 0; }`);
+  return rules.join('\n');
+}
+
+const FALLBACK_PAGE_SIZE: PageSize = { width: 210, height: 297, unit: 'mm', orientation: 'portrait' };
+
+/**
+ * Writes the profile for a stack of pages into the document, creating the element on first use.
  *
  * Idempotent and cheap: the text is compared before writing, so this is safe to call on every render
- * and does no DOM work when the page size has not changed.
+ * and does no DOM work when the page sizes have not changed.
  *
  * @returns the profile's CSS text, which is what tests assert against.
  */
-export function applyPrintProfile(size: PageSize): string {
-  const css = printProfileCss(size);
+export function applyPrintProfile(sizes: readonly PageSize[]): string {
+  const css = namedPageProfileCss(sizes);
   const existing = document.querySelector<HTMLStyleElement>(`style[${PRINT_PROFILE_ATTR}]`);
   if (existing !== null) {
     if (existing.textContent !== css) existing.textContent = css;
@@ -127,7 +152,11 @@ async function waitForImages(): Promise<void> {
  * one it was handed.
  */
 export async function exportPdf(doc: Document): Promise<void> {
-  applyPrintProfile(doc.pageSize);
+  // Every page's own size, in document order. The renderer has already pointed each page element at
+  // the matching `@page` name, so the profile and the DOM must agree on **order**: reordering pages
+  // changes which sheet size belongs to which element, and taking this list from `doc.pages` is what
+  // keeps them in step.
+  applyPrintProfile(doc.pages.map((page) => page.size));
   await waitForImages();
   window.print();
 }

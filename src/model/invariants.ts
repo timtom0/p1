@@ -8,6 +8,7 @@
 
 import type { Document, Node } from './types';
 import { MAX_GROUP_DEPTH } from './tree';
+import { pageSizeProblem, PAGE_RESIZE_BEHAVIOURS } from './page-setup';
 
 export interface InvariantViolation {
   path: string;
@@ -120,8 +121,21 @@ export function validateDocument(doc: Document): InvariantViolation[] {
   const out: InvariantViolation[] = [];
   const seen = new Set<string>();
 
-  if (doc.pageSize.width <= 0 || doc.pageSize.height <= 0) {
-    out.push({ path: 'pageSize', message: 'page size must be positive' });
+  // The setup's own default size, and then **every page's** size.
+  //
+  // The page rule replaced a single document-level check in M20, and it is checked per page on
+  // purpose: a page's size is now its own value, so "the document has a valid page size" is not a
+  // statement that can be made once. A page left at 0×0 after a bad edit renders as nothing and
+  // prints as a blank sheet, which is the failure mode a document-wide check could no longer see.
+  const setupProblem = pageSizeProblem(doc.pageSetup.defaultSize);
+  if (setupProblem !== null) {
+    out.push({ path: 'pageSetup.defaultSize', message: setupProblem });
+  }
+  if (!PAGE_RESIZE_BEHAVIOURS.includes(doc.pageSetup.resizeBehaviour)) {
+    out.push({
+      path: 'pageSetup.resizeBehaviour',
+      message: `must be one of ${PAGE_RESIZE_BEHAVIOURS.join(', ')}, got "${String(doc.pageSetup.resizeBehaviour)}"`,
+    });
   }
 
   // `assets` is required and has been since M6, but nothing checked it, so a document that
@@ -160,6 +174,11 @@ export function validateDocument(doc: Document): InvariantViolation[] {
       out.push({ path: pagePath, message: `duplicate page id "${page.id}"` });
     }
     pageIds.add(page.id);
+
+    const pageProblem = pageSizeProblem(page.size);
+    if (pageProblem !== null) {
+      out.push({ path: `${pagePath}.size`, message: pageProblem });
+    }
 
     page.objects.forEach((node, nodeIndex) => {
       checkNode(node, `${pagePath}.objects[${nodeIndex}]`, seen, out, 0, assetTable);
