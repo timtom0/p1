@@ -62,8 +62,8 @@ function stackFixture(count: number): string {
   ).join(',');
 
   return `() => ({
-    formatVersion: 1, id: 'doc_stack', name: 'stack',
-    pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+    formatVersion: 3, id: 'doc_stack', name: 'stack',
+    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [${pages}],
   })`;
@@ -692,11 +692,11 @@ test('two-page stack renders both pages', async ({ page }) => {
         fill: { type: 'solid', color },
       });
       return {
-        formatVersion: 1, id: 'doc_two', name: 'two pages',
-        pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+        formatVersion: 3, id: 'doc_two', name: 'two pages',
+        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         assets: {},
         pages: [
-          { id: 'pg_1', name: '1', background: { type: 'solid', color: '#ffffff' },
+          { id: 'pg_1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' },
             objects: [make(1, '#ff0000')] },
           { id: 'pg_2', name: '2', background: { type: 'solid', color: '#f4f4f5' },
             objects: [make(2, '#0000ff')] },

@@ -48,8 +48,8 @@ export const TINY_PNG =
  * Page order is the array order: index 0 paints first and is printed first.
  */
 export const PRINT_THREE_PAGES = `() => ({
-  formatVersion: 2, id: 'm19print', name: 'Print three pages',
-  pageSize: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' },
+  formatVersion: 3, id: 'm19print', name: 'Print three pages',
+  pageSetup: { fixedSize: true, defaultSize: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {
     dot: {
       kind: 'image', mime: 'image/png',
@@ -60,6 +60,7 @@ export const PRINT_THREE_PAGES = `() => ({
   pages: [
     {
       id: 'p1', name: 'One',
+      size: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         { type: 'shape', id: 'bleed', name: 'bleed',
@@ -114,12 +115,13 @@ export const PRINT_THREE_PAGES = `() => ({
  * hardcodes either one cannot pass both.
  */
 export const PRINT_LANDSCAPE_INCHES = `() => ({
-  formatVersion: 2, id: 'm19land', name: 'Landscape inches',
-  pageSize: { width: 8.5, height: 11, unit: 'in', orientation: 'landscape' },
+  formatVersion: 3, id: 'm19land', name: 'Landscape inches',
+  pageSetup: { fixedSize: true, defaultSize: { width: 8.5, height: 11, unit: 'in', orientation: 'landscape' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [
     {
       id: 'p1', name: 'One',
+      size: { width: 8.5, height: 11, unit: 'in', orientation: 'landscape' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         { type: 'shape', id: 'box', name: 'box',

@@ -15,11 +15,12 @@
 
 /** A document with no objects, for insertion tests. */
 export const EMPTY_PAGE = `() => ({
-  formatVersion: 1, id: 'empty', name: 'Empty',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'empty', name: 'Empty',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [],
   }],
@@ -40,11 +41,12 @@ export const EMPTY_PAGE = `() => ({
  */
 export function documentWithImages(assets: string, objects: string): string {
   return `() => ({
-  formatVersion: 1, id: 'images', name: 'Images',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'images', name: 'Images',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: ${assets},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: ${objects},
   }],

@@ -439,11 +439,12 @@ const MATRIX_FIXTURE = `() => {
     fill: { type: 'solid', color: '#3366ff' },
   });
   return {
-    formatVersion: 1, id: 'matrix', name: 'Matrix',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'matrix', name: 'Matrix',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         rect('node_plain', 'Plain', 40, 40, false, true),
@@ -464,11 +465,12 @@ const PRIMARY_FIXTURE = `() => {
     text: { blocks: [{ kind: 'paragraph', runs: [{ text }] } ] },
   });
   return {
-    formatVersion: 1, id: 'primary', name: 'Primary',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'primary', name: 'Primary',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [frame('frame_a', 'A', 40, 40, 'alpha'), frame('frame_b', 'B', 240, 40, 'beta')],
     }],

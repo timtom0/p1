@@ -49,11 +49,12 @@ import { mountFixture } from '../visual/harness';
  * the leaf's painted centre lands well inside the page and well clear of the group's own frame edges.
  */
 export const ROTATED_GROUP_ONE_CHILD = `() => ({
-  formatVersion: 1, id: 'm16rot', name: 'Rotated group',
-  pageSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16rot', name: 'Rotated group',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'group', id: 'g1', name: 'Group',
@@ -87,11 +88,12 @@ export const ROTATED_GROUP_ONE_CHILD = `() => ({
  * compose a matrix rather than invert one.
  */
 export const NESTED_GROUP = `() => ({
-  formatVersion: 1, id: 'm16nested', name: 'Nested groups',
-  pageSize: { width: 560, height: 420, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16nested', name: 'Nested groups',
+  pageSetup: { fixedSize: true, defaultSize: { width: 560, height: 420, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 560, height: 420, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'group', id: 'outer', name: 'Outer',
@@ -132,11 +134,12 @@ export const NESTED_GROUP = `() => ({
  * `c` sits well below and left of `a` and `b` so all three are independently clickable.
  */
 export const ROTATED_SIZED = `() => ({
-  formatVersion: 1, id: 'm16rot45', name: 'Rotated sizing',
-  pageSize: { width: 500, height: 450, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16rot45', name: 'Rotated sizing',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 450, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 450, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -160,11 +163,12 @@ export const ROTATED_SIZED = `() => ({
 
 /** `ROTATED_SIZED`, plus a group whose painted bounds are the union of two rotated children. */
 export const ROTATED_GROUP_MEMBERS = `() => ({
-  formatVersion: 1, id: 'm16rotgrp', name: 'Rotated group members',
-  pageSize: { width: 600, height: 450, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16rotgrp', name: 'Rotated group members',
+  pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 450, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 600, height: 450, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'plain', name: 'plain',
@@ -200,11 +204,12 @@ export const ROTATED_GROUP_MEMBERS = `() => ({
  * implementation that aligned by centre when asked to align by edge would pass on equal-size boxes.
  */
 export const THREE_SIZED_RECTS = `() => ({
-  formatVersion: 1, id: 'm16sized', name: 'Three sized rects',
-  pageSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16sized', name: 'Three sized rects',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -235,11 +240,12 @@ export const THREE_SIZED_RECTS = `() => ({
  * something moved, never that a correct implementation leaves it alone.
  */
 export const ALREADY_DISTRIBUTED = `() => ({
-  formatVersion: 1, id: 'm16dist', name: 'Already distributed',
-  pageSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16dist', name: 'Already distributed',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -270,11 +276,12 @@ export const ALREADY_DISTRIBUTED = `() => ({
  * distribution separates what cannot be separated by moving the middle object, rather than refusing.
  */
 export const OVERLAPPING_RECTS = `() => ({
-  formatVersion: 1, id: 'm16overlap', name: 'Overlapping rects',
-  pageSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16overlap', name: 'Overlapping rects',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -303,11 +310,12 @@ export const OVERLAPPING_RECTS = `() => ({
  * answer and distribution has none to give.
  */
 export const TWO_RECTS = `() => ({
-  formatVersion: 1, id: 'm16two', name: 'Two rects',
-  pageSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'm16two', name: 'Two rects',
+  pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',

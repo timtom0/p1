@@ -58,14 +58,15 @@ export const FIXTURE = `() => {
   });
 
   return {
-    formatVersion: 1,
+    formatVersion: 3,
     id: 'fixture',
     name: 'Fixture',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1',
       name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         rect('alpha', 40, 40, 120, 80),

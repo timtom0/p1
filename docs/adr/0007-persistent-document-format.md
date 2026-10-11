@@ -186,6 +186,20 @@ minimum, and a migration framework with no migrations is speculative infrastruct
 names the version in both directions. Adding a migration later means adding a table entry
 and a transform function — not restructuring the parser.
 
+> **Amended by [ADR 0019](0019-per-page-dimensions.md) (M20).** The first migration now exists, and
+> this section's premise no longer holds.
+>
+> The claim was never "migrations are hard" — it was a description of the situation, true while every
+> accepted version was a **strict subset** of the current one and so needed nothing converted. Version
+> 3 ended that by *moving* a field rather than adding one: a version-1/2 file has one `pageSize` and no
+> per-page `size`, so reading one derives a value the file does not contain.
+>
+> The good news is that the prediction above was right about the shape. The contract did its job — the
+> parser dispatches on version, the key lists became version-dependent, and the transform slotted in
+> without restructuring anything. The bad news is only that "no migrations exist" is now false, and a
+> reader who took it as a principle would have been misled. The parser comment above
+> `MINIMUM_FORMAT_VERSION` was corrected in place at the same time.
+
 **Unknown fields.** Two categories, and the difference matters:
 
 | Kind | Policy | Why |

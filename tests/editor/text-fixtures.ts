@@ -23,11 +23,12 @@ export const EMPTY_IDS = {
 
 /** Three paragraphs, four formats, a soft break, and frame typography. */
 export const TEXT_FIXTURE = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -56,11 +57,12 @@ export const TEXT_FIXTURE = `() => ({
 
 /** A single empty paragraph. */
 export const EMPTY_FIXTURE = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -82,11 +84,12 @@ export const EMPTY_FIXTURE = `() => ({
  * following ADR 0001 finding 4).
  */
 export const BLANK_LINE_FIXTURE = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -108,11 +111,12 @@ export const OVERFLOW_FIXTURE = `() => {
     blocks.push({ kind: 'paragraph', runs: [{ text: 'Line ' + i }] });
   }
   return {
-    formatVersion: 1, id: 'f', name: 'F',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'f', name: 'F',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [{
         id: 'copy', type: 'textFrame', name: 'copy',

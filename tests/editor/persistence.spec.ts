@@ -258,11 +258,11 @@ test.describe('save and reopen', () => {
     // Injected for *rendering*, which is what `__P1_FIXTURE__` is for. Nothing downstream
     // depends on it: the document is saved from the running app like any other.
     const source = `() => ({
-      formatVersion: 1, id: 'multi', name: 'Multi',
-      pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+      formatVersion: 3, id: 'multi', name: 'Multi',
+      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       assets: {},
       pages: [
-        { id: 'p1', name: 'One', background: { type: 'solid', color: '#ffffff' }, objects: [
+        { id: 'p1', name: 'One', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
           { type: 'shape', id: 'n1', name: 'R', transform: { x: 10, y: 10, width: 40, height: 20, rotation: 0, scaleX: 1, scaleY: 1 },
             visible: true, locked: false, opacity: 1, blendMode: 'normal',
             shape: { kind: 'rect', cornerRadius: 3 }, fill: { type: 'solid', color: '#ff0000' } },
@@ -336,10 +336,10 @@ test.describe('save and reopen', () => {
     browser,
   }) => {
     const source = `() => ({
-      formatVersion: 1, id: 'kinds', name: 'Kinds',
-      pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+      formatVersion: 3, id: 'kinds', name: 'Kinds',
+      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       assets: {},
-      pages: [{ id: 'p1', name: '1', background: { type: 'solid', color: '#ffffff' }, objects: [
+      pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
         { type: 'shape', id: 'n_rect', name: 'Rect', transform: { x: 20, y: 20, width: 60, height: 40, rotation: 0, scaleX: 1, scaleY: 1 },
           visible: true, locked: false, opacity: 1, blendMode: 'normal',
           shape: { kind: 'rect', cornerRadius: 5 }, fill: { type: 'solid', color: '#3366ff' },
@@ -377,10 +377,10 @@ test.describe('save and reopen', () => {
 
   test('transformed objects round-trip, including rotation and scale', async ({ browser }) => {
     const source = `() => ({
-      formatVersion: 1, id: 'xf', name: 'Transformed',
-      pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+      formatVersion: 3, id: 'xf', name: 'Transformed',
+      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       assets: {},
-      pages: [{ id: 'p1', name: '1', background: { type: 'solid', color: '#ffffff' }, objects: [
+      pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
         { type: 'shape', id: 'n_rot', name: 'Rotated', transform: { x: 40, y: 40, width: 80, height: 40, rotation: 0.5235987755982988, scaleX: 1.25, scaleY: 0.75 },
           visible: true, locked: false, opacity: 0.6, blendMode: 'multiply',
           shape: { kind: 'rect', cornerRadius: 0 }, fill: { type: 'solid', color: '#123456' } },
@@ -486,10 +486,10 @@ test.describe('assets', () => {
 
     const external = JSON.stringify({
       format: 'p1doc',
-      formatVersion: 1,
+      formatVersion: 3,
       id: 'doc_ext',
       name: 'External',
-      pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       assets: {
         asset_x: {
           kind: 'image',
@@ -504,6 +504,7 @@ test.describe('assets', () => {
         {
           id: 'p1',
           name: '1',
+          size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [
             {
@@ -561,7 +562,7 @@ test.describe('refused documents', () => {
   function base(): Record<string, unknown> {
     return {
       format: 'p1doc',
-      formatVersion: 1,
+      formatVersion: 3,
       id: 'doc_1',
       name: 'Base',
       pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
@@ -570,6 +571,7 @@ test.describe('refused documents', () => {
         {
           id: 'page_1',
           name: '1',
+          size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [
             {

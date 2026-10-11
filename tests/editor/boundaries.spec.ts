@@ -494,11 +494,12 @@ const SEAM_FIXTURE = `() => {
     fill: { type: 'solid', color: '#3366ff' },
   });
   return {
-    formatVersion: 1, id: 'seam', name: 'Seam',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'seam', name: 'Seam',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         rect('node_a', 'A', 40, 40),
@@ -533,11 +534,12 @@ const IMAGE_FIXTURE = documentWithImages(
 );
 
 const SESSION_FIXTURE = `() => ({
-  formatVersion: 1, id: 'session', name: 'Session',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'session', name: 'Session',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'textFrame', id: 'node_frame', name: 'Frame',

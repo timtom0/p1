@@ -17,11 +17,12 @@
 
 /** One short line, unrotated, no wrapping, no overflow. The control case. */
 export const SIMPLE = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -38,11 +39,12 @@ export const ROTATED = SIMPLE.replace('rotation: 0', 'rotation: 0.52359877559829
 
 /** Narrow frame, so the same sentence wraps onto several lines. */
 export const WRAPPED = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -58,11 +60,12 @@ export const WRAPPED = `() => ({
 
 /** A soft break per line, inside one paragraph. Contrast with `WRAPPED`. */
 export const SOFT_BREAKS = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -76,11 +79,12 @@ export const SOFT_BREAKS = `() => ({
 
 /** Three paragraphs, each its own `<p>`. Contrast with `SOFT_BREAKS`. */
 export const MULTI_PARAGRAPH = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -98,11 +102,12 @@ export const MULTI_PARAGRAPH = `() => ({
 
 /** One empty paragraph. The case where a Range has nothing to select. */
 export const EMPTY = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -121,11 +126,12 @@ export const EMPTY = `() => ({
  * to the spaces alone.
  */
 export const TRAILING_SPACES = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -146,11 +152,12 @@ export const OVERFLOW = `() => {
     blocks.push({ kind: 'paragraph', runs: [{ text: 'Line ' + i }] });
   }
   return {
-    formatVersion: 1, id: 'f', name: 'F',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'f', name: 'F',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [{
         id: 'copy', type: 'textFrame', name: 'copy',
@@ -170,11 +177,12 @@ export const OVERFLOW = `() => {
  * the divergence 64.8px, so it cannot be rounding either.
  */
 export const FRACTIONAL_LINES = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',
@@ -203,11 +211,12 @@ export const HIDDEN_FRAME = SIMPLE.replace('visible: true', 'visible: false');
  * would make every measurement conditional on a stylesheet the document does not own.
  */
 export const UNSTYLED = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       id: 'copy', type: 'textFrame', name: 'copy',

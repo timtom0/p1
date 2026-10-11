@@ -54,11 +54,12 @@ import { mountFixture } from '../visual/harness';
  * it and crosses `plain` is a gesture with real text underneath it.
  */
 const FIXTURE = `() => ({
-  formatVersion: 1, id: 'f', name: 'F',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'f', name: 'F',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       {

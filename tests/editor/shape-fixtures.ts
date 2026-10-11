@@ -39,11 +39,12 @@ export const SHAPES = `() => {
   });
 
   return {
-    formatVersion: 1, id: 'shapes', name: 'Shapes',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'shapes', name: 'Shapes',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         // A plain filled rectangle: the control case for fill.
@@ -126,11 +127,12 @@ export const SHAPES = `() => {
  * and a test that cannot tell them apart is not testing creation.
  */
 export const EMPTY_PAGE = `() => ({
-  formatVersion: 1, id: 'empty', name: 'Empty',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'empty', name: 'Empty',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [],
   }],
@@ -138,11 +140,12 @@ export const EMPTY_PAGE = `() => ({
 
 /** `EMPTY_PAGE` with one stroked rectangle, for inspector and multi-select tests. */
 export const TWO_RECTS = `() => ({
-  formatVersion: 1, id: 'two', name: 'Two',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'two', name: 'Two',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       {

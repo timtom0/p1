@@ -44,11 +44,11 @@ export const GROUPS = `() => {
   const paragraph = (...runs) => ({ kind: 'paragraph', runs });
 
   return {
-    formatVersion: 2,
+    formatVersion: 3,
     format: 'p1doc',
     id: 'grouped',
     name: 'Grouped kinds',
-    pageSize: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' },
+    pageSetup: { fixedSize: true, defaultSize: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {
       a1: {
         kind: 'image', mime: 'image/png',
@@ -59,6 +59,7 @@ export const GROUPS = `() => {
     pages: [
       {
         id: 'p1', name: '1',
+        size: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           // A group holding one of every kind, rotated and uniformly scaled by 1.5. Nothing inside

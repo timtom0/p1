@@ -306,8 +306,11 @@ function documentUnit(): PhysicalUnit {
   // act on the page the user is looking at now, including after they scrolled the viewport.
   const pagePanel = mountPagePanel(queryRequired<HTMLElement>('[data-pages-panel]'), store, {
     currentIndex: () => viewport.focusedPageIndex,
-    onFocusPage: (index: number) => {
-      viewport.fitPage(index);
+    onFocusPage: (index: number, fit?: boolean) => {
+      // Two distinct intents. Clicking a page in the list re-frames it; refocusing after an
+      // operation must leave the zoom alone, or every 'add page' resets the user's magnification.
+      if (fit === false) viewport.focusPage(index);
+      else viewport.fitPage(index);
       refreshChrome();
     },
   });

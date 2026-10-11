@@ -47,8 +47,14 @@ import type { Document, Page, PageSize } from '../model/types';
 import { isPhysicalUnit, type PhysicalUnit } from '../core/units/units';
 
 export interface PagePanelOptions {
-  /** Brings a page into view and makes it the focused one. */
-  onFocusPage: (index: number) => void;
+  /**
+   * Makes `index` the focused page.
+   *
+   * `fit` distinguishes two intents: clicking a page in the list means "go there" and re-frames it,
+   * while refocusing after an operation means "stay on this page" and must not touch the zoom.
+   * Getting that wrong is not cosmetic -- see `Viewport.focusPage`.
+   */
+  onFocusPage: (index: number, fit?: boolean) => void;
   /**
    * The currently focused page's index.
    *
@@ -138,23 +144,41 @@ export function mountPagePanel(
     store.mutate(describeCommand(command), () => command);
   };
 
-  addButton.addEventListener('click', () => commit({ type: 'addPage' }));
+  addButton.addEventListener('click', () => {
+    commit({ type: 'addPage' });
+    // Focus the page just created. Leaving focus where it was would make the next Delete remove a
+    // page the user never selected.
+    options.onFocusPage(doc().pages.length - 1);
+  });
   duplicateButton.addEventListener('click', () => {
     const page = focusedPage(doc(), options.currentIndex());
-    if (page !== undefined) commit({ type: 'duplicatePage', pageId: page.id });
+    if (page !== undefined) {
+      commit({ type: 'duplicatePage', pageId: page.id });
+      // The copy sits directly after the original.
+      options.onFocusPage(options.currentIndex() + 1);
+    }
   });
   deleteButton.addEventListener('click', () => {
     const page = focusedPage(doc(), options.currentIndex());
-    if (page !== undefined) commit({ type: 'deletePage', pageId: page.id });
+    if (page !== undefined) {
+      const at = options.currentIndex();
+      commit({ type: 'deletePage', pageId: page.id });
+      // Land on whatever slid into this position, or on the new last page.
+      options.onFocusPage(Math.min(at, doc().pages.length - 1));
+    }
   });
-  upButton.addEventListener('click', () => {
+  // Reorder moves the page and then re-focuses **it**, not the position. The focused page is an
+  // index, so leaving the index alone after a move silently points the focus at a different page --
+  // which is how a 'move up' followed by a 'delete' removes the wrong page.
+  const moveBy = (delta: number): void => {
     const index = options.currentIndex();
-    commit({ type: 'movePage', pageId: doc().pages[index]!.id, toIndex: index - 1 });
-  });
-  downButton.addEventListener('click', () => {
-    const index = options.currentIndex();
-    commit({ type: 'movePage', pageId: doc().pages[index]!.id, toIndex: index + 1 });
-  });
+    const page = doc().pages[index];
+    if (page === undefined) return;
+    commit({ type: 'movePage', pageId: page.id, toIndex: index + delta });
+    options.onFocusPage(index + delta);
+  };
+  upButton.addEventListener('click', () => moveBy(-1));
+  downButton.addEventListener('click', () => moveBy(1));
 
   // --- this page's size -----------------------------------------------------------------------
   const presetSelect = el('select', { 'data-page-preset': '' });

@@ -22,11 +22,12 @@ import { mountFixture } from '../visual/harness';
 
 /** Three rects: `a` top-left, `b` top-right, `c` below `a`. */
 const THREE_RECTS = `() => ({
-  formatVersion: 1, id: 'gdoc', name: 'Groups',
-  pageSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'gdoc', name: 'Groups',
+  pageSetup: { fixedSize: true, defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -50,11 +51,12 @@ const THREE_RECTS = `() => ({
 
 /** `THREE_RECTS` with `a` and `b` already wrapped in a group, authored at the transparent frame. */
 const GROUPED = `() => ({
-  formatVersion: 1, id: 'gdoc', name: 'Groups',
-  pageSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'gdoc', name: 'Groups',
+  pageSetup: { fixedSize: true, defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'group', id: 'g1', name: 'Group',

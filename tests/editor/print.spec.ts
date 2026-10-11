@@ -263,15 +263,16 @@ test.describe('the sheet is the document page', () => {
       buffer: Buffer.from(
         JSON.stringify({
           format: 'p1doc',
-          formatVersion: 2,
+          formatVersion: 3,
           id: 'other',
           name: 'Other',
-          pageSize: { width: 5, height: 7, unit: 'in', orientation: 'portrait' },
+          pageSetup: { fixedSize: true, defaultSize: { width: 5, height: 7, unit: 'in', orientation: 'portrait' }, resizeBehaviour: 'crop' },
           assets: {},
           pages: [
             {
               id: 'p1',
               name: 'One',
+              size: { width: 5, height: 7, unit: 'in', orientation: 'portrait' },
               background: { type: 'solid', color: '#ffffff' },
               objects: [],
             },

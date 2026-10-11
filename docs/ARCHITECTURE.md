@@ -40,6 +40,7 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M17** Snapping & guides | **Done** — see [M17 notes](#m17-implementation-notes--snapping-and-guides) and [ADR 0017](adr/0017-snapping-and-guides.md). A pure snapping engine, a 10-screen-pixel threshold, page features scanned first, Alt as an explicit opt-out, transient guides. F21: the moving box is captured at pointer-down. |
 | **M18** Visibility semantics | **Done** — see [M18 notes](#m18-implementation-notes--visibility-semantics). `visible: false` is not a rendering detail: a node is effectively visible when it **and every ancestor** is visible. The contract already lived in the renderer and in `selection.ts`; `arrange.ts` was the outlier and now filters placements. |
 | **M19** Print profile & PDF export | **Done** — see [M19 notes](#m19-implementation-notes--print-profile-and-pdf-export) and [ADR 0018](adr/0018-print-profile-and-pdf-export.md). Export is `window.print()` against a print profile — no PDF writer and no second representation of the document. |
+| **M20** Page management | **Done - per-page dimensions, page commands, mixed-size PDF** - see [ADR 0019](adr/0019-per-page-dimensions.md) |
 | M20+ | Not started |
 
 Seventeen known limitations are recorded rather than hidden. Three of them are now closed and struck

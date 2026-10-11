@@ -33,8 +33,8 @@ const FIXTURE = `() => {
     asset,
   });
   return {
-    formatVersion: 2, id: 'gcdot', name: 'GC',
-    pageSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'gcdot', name: 'GC',
+    pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {
       asset_used: record('USED'),
       asset_nested: record('NESTED'),
@@ -42,6 +42,7 @@ const FIXTURE = `() => {
     },
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         image('top', 'asset_used', 10),

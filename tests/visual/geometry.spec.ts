@@ -59,10 +59,11 @@ test('landscape orientation swaps the page box', async ({ page }) => {
   await mountFixture(
     page,
     `() => ({
-      formatVersion: 1, id: 'doc_l', name: 'landscape',
-      pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'landscape' },
+      formatVersion: 3, id: 'doc_l', name: 'landscape',
+      pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'landscape' }, resizeBehaviour: 'crop' },
       assets: {},
       pages: [{ id: 'page_1', name: '1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'landscape' },
         background: { type: 'solid', color: '#ffffff' }, objects: [] }],
     })`,
   );
@@ -171,10 +172,11 @@ test('page clips overflowing objects with overflow:hidden', async ({ page }) => 
   await mountFixture(
     page,
     `() => ({
-      formatVersion: 1, id: 'doc_c', name: 'clip',
-      pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      formatVersion: 3, id: 'doc_c', name: 'clip',
+      pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       assets: {},
       pages: [{ id: 'page_1', name: '1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [{
           id: 'node_c', type: 'shape', name: 'overhang',
@@ -241,10 +243,11 @@ test('later objects paint over earlier ones', async ({ page }) => {
       const red = make('a_bottom', '#ff0000');
       const blue = make('b_top', '#0000ff');
       return {
-        formatVersion: 1, id: 'doc_p', name: 'paint order',
-        pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+        formatVersion: 3, id: 'doc_p', name: 'paint order',
+        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         assets: {},
         pages: [{ id: 'page_1', name: '1',
+          size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: '${order}' === 'ab' ? [red, blue] : [blue, red] }],
       };
@@ -502,10 +505,11 @@ function rectFixture(t: {
   rotation: number;
 }): string {
   return `() => ({
-    formatVersion: 1, id: 'doc_x', name: 'geometry',
-    pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+    formatVersion: 3, id: 'doc_x', name: 'geometry',
+    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{ id: 'page_1', name: '1',
+      size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [{
         id: 'node_x', type: 'shape', name: 'rect',

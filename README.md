@@ -51,7 +51,7 @@ interaction and persistence; the DOM is a disposable projection of that model.
   semantic. The geometry a later group relies on.
 - [ADR 0012 — the persistent group model](docs/adr/0012-persistent-group-model.md) —
   `GroupNode` with group-local children, nesting, uniform-only group scale, the one
-  recursive traversal, paint order by flattening, and `formatVersion: 2` with no
+  recursive traversal, paint order by flattening, and `formatVersion: 3` with no
   migration. **The group as a document object.**
 - [ADR 0013 — group interaction](docs/adr/0013-group-interaction.md) — how a group is
   entered, selected, moved and left, and why the page→group→child conversion is the
@@ -332,7 +332,7 @@ Groups exist, are documents, and nest. <kbd>ctrl</kbd>+<kbd>G</kbd> groups the s
 there is no menu and a chord sits more cheaply than one.
 
 - A group is a real node with group-local children, saved in the document and part of
-  `formatVersion: 2`.
+  `formatVersion: 3`.
 - <kbd>alt</kbd>+click selects the containing group rather than the leaf you clicked.
 - <kbd>Esc</kbd> leaves a group before it clears the selection.
 - **Dragging a child inside a rotated or scaled group follows the page axis, not the group's.**
@@ -411,7 +411,7 @@ malformed, never because a picture would not paint.
 ## Printing and PDF export
 
 **Export PDF** in the document toolbar opens the browser's own print dialog, with the document already
-described to it: one document page per sheet, at the page size the document says, in the order the pages
+described to it: one document page per sheet, at **that page's own** size, in the order the pages
 are in.
 
 > You get a PDF out of *your* print dialog. "Save as PDF" is one of its destinations — which means the
@@ -440,7 +440,9 @@ What the print profile does, in three groups:
 The sheet comes from the document: a page authored in millimetres gets `@page { size: 210mm 297mm }`,
 one authored in inches gets `8.5in 11in`, and landscape is the renderer's own orientation rule rather
 than a swap re-implemented here. **A4 is nowhere in the code** — it is a choice this editor does not
-make for you. Page size is not authorable in the UI; it arrives from the file or from New.
+make for you.
+
+**Page size is authorable since M20**, per page: the pages panel carries the focused page's preset, width, height, unit and orientation, and New offers seven paper presets plus custom dimensions. A document keeps a document-level default for the *next* page while each page keeps its own size, so a document can mix A4 and A5 and print each at the right size. See [ADR 0019](docs/adr/0019-per-page-dimensions.md).
 
 **Two limitations worth stating rather than discovering.**
 

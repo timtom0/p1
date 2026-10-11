@@ -1108,11 +1108,12 @@ const LAYER_FIXTURE = `() => {
     fill: { type: 'solid', color: '#3366ff' },
   });
   return {
-    formatVersion: 1, id: 'layers', name: 'Layers',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'layers', name: 'Layers',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       // Paint order: alpha, beta, gamma, delta.
       objects: [
@@ -1158,11 +1159,12 @@ const overlapFixture = (underId: string, overId: string, lockOver: boolean) => `
     fill: { type: 'solid', color },
   });
   return {
-    formatVersion: 1, id: 'overlap', name: 'Overlap',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'overlap', name: 'Overlap',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       // The later entry paints on top.
       objects: [
@@ -1183,11 +1185,12 @@ const LOCKED_OVERLAP_FIXTURE = overlapFixture(LOCKED_UNDER.id, LOCKED_OVER.id, t
 const ROTATED = { id: 'node_rot', name: 'Rot', x: 80, y: 80, width: 200, height: 50 };
 
 const ROTATED_FIXTURE = `() => ({
-  formatVersion: 1, id: 'rot', name: 'Rotated',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'rot', name: 'Rotated',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [{
       type: 'shape', id: 'node_rot', name: 'Rot',
@@ -1202,11 +1205,12 @@ const ROTATED_FIXTURE = `() => ({
 
 /** A rect and a text frame, for the mixed-type selection. */
 const MIXED_FIXTURE = `() => ({
-  formatVersion: 1, id: 'mixed', name: 'Mixed',
-  pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+  formatVersion: 3, id: 'mixed', name: 'Mixed',
+  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'node_mix_rect', name: 'Rect',

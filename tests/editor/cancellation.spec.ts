@@ -495,11 +495,12 @@ const CANCEL_FIXTURE = `() => {
     fill: { type: 'solid', color: '#3366ff' },
   });
   return {
-    formatVersion: 1, id: 'cancel', name: 'Cancel',
-    pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'cancel', name: 'Cancel',
+    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: [{
       id: 'p1', name: '1',
+      size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' },
       objects: [
         rect('node_a', 'A', 40, 40, 120, 80),

@@ -812,7 +812,7 @@ body {
   .toolbar,
   .ruler-corner,
   .ruler,
-  .inspector,
+  .app__side,
   .status,
   .overlay {
     display: none !important;

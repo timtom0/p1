@@ -581,10 +581,10 @@ test.describe('snap state never reaches the document', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(
         JSON.stringify({
-          formatVersion: 2,
+          formatVersion: 3,
           id: 'x',
           name: 'X',
-          pageSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' },
+          pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
           assets: {},
           guides: [],
           pages: [],

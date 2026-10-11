@@ -37,11 +37,12 @@ import { mountFixture } from '../visual/harness';
  * | +160 | 220 / 270 / 320 | nothing: 30 is the smallest distance |
  */
 export const TWO_WELL_SEPARATED = `() => ({
-  formatVersion: 1, id: 'm17sep', name: 'Separated',
-  pageSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
+  formatVersion: 3, id: 'm17sep', name: 'Separated',
+  pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -70,11 +71,12 @@ export const TWO_WELL_SEPARATED = `() => ({
  * | +160 | 166 / 216 / 266 | nothing: 34 is the smallest distance |
  */
 export const NEAR_PAGE_LEFT = `() => ({
-  formatVersion: 1, id: 'm17page', name: 'Near page edge',
-  pageSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
+  formatVersion: 3, id: 'm17page', name: 'Near page edge',
+  pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -101,11 +103,12 @@ export const NEAR_PAGE_LEFT = `() => ({
  * `loose` sits at (120, 330) 90x50, far from the group, so a drag of `child` towards it has one candidate.
  */
 export const NESTED_ROTATED_CHILD = `() => ({
-  formatVersion: 1, id: 'm17nested', name: 'Nested rotated',
-  pageSize: { width: 600, height: 420, unit: 'px', orientation: 'portrait' },
+  formatVersion: 3, id: 'm17nested', name: 'Nested rotated',
+  pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 420, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 600, height: 420, unit: 'px', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'group', id: 'grp', name: 'Group',
@@ -136,11 +139,12 @@ export const NESTED_ROTATED_CHILD = `() => ({
  * `target`'s left, which snaps by +4.
  */
 export const THREE_FOR_MULTI = `() => ({
-  formatVersion: 1, id: 'm17multi', name: 'Multi selection',
-  pageSize: { width: 620, height: 400, unit: 'px', orientation: 'portrait' },
+  formatVersion: 3, id: 'm17multi', name: 'Multi selection',
+  pageSetup: { fixedSize: true, defaultSize: { width: 620, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 620, height: 400, unit: 'px', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',
@@ -215,11 +219,12 @@ export async function mountThreeForMulti(page: Page): Promise<void> {
  * so the y axis never snaps and "no guide at high zoom" is a statement about x alone.
  */
 export const ZOOM_INVARIANCE = `() => ({
-  formatVersion: 1, id: 'm17zoom', name: 'Zoom invariance',
-  pageSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
+  formatVersion: 3, id: 'm17zoom', name: 'Zoom invariance',
+  pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   assets: {},
   pages: [{
     id: 'p1', name: '1',
+    size: { width: 600, height: 400, unit: 'px', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects: [
       { type: 'shape', id: 'a', name: 'a',

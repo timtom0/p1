@@ -40,8 +40,8 @@ export const ROTATED_KINDS = `() => {
   const run = (text, format) => (format === undefined ? { text } : { text, format });
 
   return {
-    formatVersion: 1, id: 'rotated', name: 'Rotated kinds',
-    pageSize: { width: 900, height: 700, unit: 'pt', orientation: 'portrait' },
+    formatVersion: 3, id: 'rotated', name: 'Rotated kinds',
+    pageSetup: { fixedSize: true, defaultSize: { width: 900, height: 700, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {
       a1: {
         kind: 'image', mime: 'image/png',
@@ -52,6 +52,7 @@ export const ROTATED_KINDS = `() => {
     pages: [
       {
         id: 'p1', name: '1',
+        size: { width: 900, height: 700, unit: 'pt', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           // Thirty degrees, on every kind. Enough to make a 1px chrome outline miss by tens of

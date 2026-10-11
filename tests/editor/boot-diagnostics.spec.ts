@@ -118,11 +118,12 @@ test.describe('the counts are named for what they count', () => {
     await mountFixture(
       page,
       `() => ({
-        formatVersion: 2, id: 'diag', name: 'Diag',
-        pageSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' },
+        formatVersion: 3, id: 'diag', name: 'Diag',
+        pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         assets: {},
         pages: [{
           id: 'p1', name: '1',
+          size: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [{
             type: 'group', id: 'g1', name: 'G',

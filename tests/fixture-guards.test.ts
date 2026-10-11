@@ -24,7 +24,7 @@
  *  - the source parses at all (the pre-existing rule), and
  *  - every `Document` literal carries `assets`.
  *
- * `pages` and `pageSize` were never a problem because the renderer reads them immediately
+ * `pages` and `pageSetup` were never a problem because the renderer reads them immediately
  * and a missing one fails the boot the `waitForApp` guard already reports. `assets` was
  * invisible for exactly the duration between M6 and M7, which is what a guard is for.
  */
@@ -55,9 +55,9 @@ interface DocumentLiteral {
 }
 
 /**
- * Finds every object literal that looks like a document, by its required `pageSize` field.
+ * Finds every object literal that looks like a document, by its required `pageSetup` field.
  *
- * Keyed on `pageSize` rather than `formatVersion` because `pageSize` is the one field every
+ * Keyed on `pageSetup` rather than `formatVersion` because `pageSetup` is the one field every
  * fixture must have for the renderer to lay the page out at all, so it cannot miss a literal
  * that exists.
  */
@@ -67,7 +67,7 @@ function findDocumentLiterals(): DocumentLiteral[] {
     const lines = readFileSync(file, 'utf8').split('\n');
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? '';
-      if (!/^\s*pageSize:\s*\{/.test(line)) continue;
+      if (!/^\s*pageSetup:\s*\{/.test(line)) continue;
       found.push({ file, line: index + 1, text: line.trim() });
     }
   }
@@ -87,7 +87,7 @@ describe('injected document fixtures', () => {
     const missing: string[] = [];
     for (const literal of literals) {
       const lines = readFileSync(literal.file, 'utf8').split('\n');
-      // The window is the pageSize line plus the two after it: `assets` sits on the next
+      // The window is the pageSetup line plus the two after it: `assets` sits on the next
       // line in every existing fixture, but a window keeps a differently-formatted fixture
       // from tripping this.
       const window = lines.slice(literal.line - 1, literal.line + 2).join('\n');
@@ -99,7 +99,7 @@ describe('injected document fixtures', () => {
       missing,
       'these document literals omit `assets`, so the app receives a document that is not a ' +
         '`Document`. Add `assets: {}` (or the records the fixture needs) on or after the ' +
-        '`pageSize` line.',
+        '`pageSetup` line.',
     ).toEqual([]);
   });
 

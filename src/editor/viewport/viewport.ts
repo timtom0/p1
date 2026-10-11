@@ -286,7 +286,26 @@ export class Viewport {
     this.centerContent();
   }
 
-  /** Fit a single page, and make it the focused page. */
+  /**
+ * Make a page the focused one, without touching the zoom.
+ *
+ * Separate from {@link fitPage} because they answer different questions. "Go to this page" means
+ * scroll to it and leave the zoom alone; "fit this page" means re-frame it, which changes what the
+ * user is looking at for reasons that have nothing to do with which page they are on.
+ *
+ * Conflating them made a page **reorder** lose its focus: the focused page is an index, so after
+ * moving page 2 to position 1 the viewport still reported index 1 -- which is now a different page.
+ * The pages panel then highlighted the wrong row, and a following "delete" removed a page the user was
+ * no longer looking at. Post-action refocusing needs this, not `fitPage`.
+ */
+focusPage(index: number): void {
+  const clamped = this.clampPageIndex(index);
+  if (clamped === null || clamped === this.focused) return;
+  this.focused = clamped;
+  this.emit();
+}
+
+/** Fit a single page, and make it the focused page. */
   fitPage(index: number): void {
     const clamped = this.clampPageIndex(index);
     if (clamped === null) return;
