@@ -64,8 +64,8 @@ body {
   grid-template-rows: auto var(--ruler-size) 1fr auto;
   grid-template-areas:
     'toolbar toolbar  toolbar'
-    'corner  h-ruler  inspector'
-    'v-ruler surface  inspector'
+    'corner  h-ruler  side'
+    'v-ruler surface  side'
     'status  status   status';
   height: 100%;
 }
@@ -611,9 +611,18 @@ body {
 
 /* ---------------------------------------------------------------- inspector */
 
-.inspector {
-  grid-area: inspector;
+.app__side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-left: 1px solid var(--chrome-border);
+}
+
+.inspector {
+  /* The border lives on the column now, so the two panels do not double it up. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   font-size: 12px;
 }
@@ -889,4 +898,181 @@ body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+}
+/* ---------------------------------------------------------------------------
+Pages panel (M20)
+---------------------------------------------------------------------------- */
+
+.pages-panel {
+  /* Takes only what it needs and leaves the rest to the inspector, because a page
+     list for a 40-page document should not push the property inspector off screen. */
+  flex: 0 1 auto;
+  max-height: 45%;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--chrome-border);
+  font-size: 12px;
+}
+
+.p1-pages__heading {
+  margin: 0;
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chrome-muted);
+}
+
+.p1-pages__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px;
+}
+
+.p1-pages__row + .p1-pages__row {
+  margin-top: 2px;
+}
+
+.p1-pages__select {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.p1-pages__select:hover {
+  background: #2f323b;
+}
+
+/* The focused page, marked by border rather than background so it survives a dark
+   or high-contrast theme without a second colour token. */
+.p1-pages__row[aria-current='true'] .p1-pages__select {
+  border-color: var(--chrome-border);
+  /* Matches the toolbar's pressed-button treatment: a tinted background plus the accent border. */
+  background: #2b3350;
+  border-color: var(--selection);
+}
+
+.p1-pages__name {
+  font-weight: 600;
+}
+
+.p1-pages__size,
+.p1-pages__note,
+.p1-pages__empty {
+  color: var(--chrome-muted);
+}
+
+.p1-pages__note {
+  margin: 6px 12px;
+  line-height: 1.4;
+}
+
+.p1-pages__empty {
+  margin: 4px 12px;
+}
+
+.p1-pages__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+}
+
+.p1-pages__section {
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--chrome-border);
+}
+
+.p1-pages__section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chrome-muted);
+}
+
+.p1-pages__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.p1-pages__field-label {
+  flex: 0 0 84px;
+  color: var(--chrome-muted);
+}
+
+/* Document setup dialog (M20) */
+
+.p1-setup {
+  min-width: 380px;
+  padding: 0;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  background: var(--chrome-bg);
+  color: inherit;
+}
+
+.p1-setup::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.p1-setup__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.p1-setup__form h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.p1-setup__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.p1-setup__label {
+  flex: 0 0 140px;
+  color: var(--chrome-muted);
+}
+
+.p1-setup__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.p1-setup__note,
+.p1-setup__error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.p1-setup__note {
+  color: var(--chrome-muted);
+}
+
+.p1-setup__error {
+  min-height: 1.4em;
+  color: #c0392b;
+}
+
+.p1-setup__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }

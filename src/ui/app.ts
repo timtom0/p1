@@ -47,9 +47,10 @@ import { Rulers } from './chrome/ruler';
 import { bindShortcuts } from './chrome/shortcuts';
 import { bindEditingShortcuts } from './chrome/editing-shortcuts';
 import { applyPrintProfile, exportPdf } from './print-profile';
+import { mountPagePanel } from './page-panel';
+import { mountDocumentSetupDialog } from './document-setup';
 import { mountInspector } from './inspector';
 import { DocumentSession, browserGateway } from './persistence';
-import { createDocument } from '../model/factory';
 
 /**
  * Whether a press landed inside a text frame that is currently being edited.
@@ -301,6 +302,17 @@ function documentUnit(): PhysicalUnit {
     store,
     documentUnit,
   );
+  // The pages panel. currentIndex is a getter rather than a value so that "delete" and "move" always
+  // act on the page the user is looking at now, including after they scrolled the viewport.
+  const pagePanel = mountPagePanel(queryRequired<HTMLElement>('[data-pages-panel]'), store, {
+    currentIndex: () => viewport.focusedPageIndex,
+    onFocusPage: (index: number) => {
+      viewport.fitPage(index);
+      refreshChrome();
+    },
+  });
+
+  const documentSetup = mountDocumentSetupDialog();
 
   /**
    * The text-session host.
@@ -398,6 +410,9 @@ function documentUnit(): PhysicalUnit {
     syncDocumentChrome();
     syncLayerButtons();
     syncArrangeButtons();
+    // The pages panel reads the focused page's index, which changes on scroll and on a click in
+    // the list without any document edit -- so it is refreshed here rather than only in project.
+    pagePanel.render(viewport.focusedPageIndex);
   }
 
   /**
@@ -446,14 +461,25 @@ function documentUnit(): PhysicalUnit {
    * `confirm`: it is the one case where interrupting the user is the right behaviour, and
    * it needs no machinery to explain.
    */
-  function newDocument(): void {
+  async function newDocument(): Promise<void> {
     if (documentSession.isDirty) {
       const discard = window.confirm(
         'This document has unsaved changes. Discard them and start a new document?',
       );
       if (!discard) return;
     }
-    documentSession.resetTo(createDocument({ name: 'Untitled' }));
+
+    // The dialog, not createDocument() with no arguments. Page size, the fixed-size default and the
+    // resize policy are all authored choices now, and making a new document mean "press New and get
+    // whatever the factory happened to pick" would put them somewhere the user cannot see or change.
+    //
+    // Pre-filled from the open document: someone who has been working in A5 and presses New almost
+    // always wants A5 again. See document-setup.ts.
+    const created = await documentSetup.open(store.state);
+    // Cancelled. The dirty-document question was already asked and answered above, and re-asking it
+    // would be the second prompt for one gesture.
+    if (created === null) return;
+    documentSession.resetTo(created);
   }
 
   /**

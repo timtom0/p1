@@ -195,7 +195,23 @@
         markup here stays empty on purpose — a hand-written field list in HTML would
         immediately drift from the schema.
       -->
-      <aside class="inspector" data-inspector></aside>
+      <!--
+The right-hand column. A wrapper rather than two grid areas because both panels want the full height
+of the surface row and the grid has one column for them; nesting them in a flex column lets each
+scroll independently without a second track, and keeps `.app`'s areas to one name for the whole side.
+
+The pages panel is built in `page-panel.ts` like the inspector, so its markup stays empty and cannot
+drift from the code that fills it.
+
+Its two sections are separate on purpose. "This page" edits a value on one `Page`; "New pages" edits
+the document's `pageSetup`, which decides the size of the *next* page and what a resize does. They
+only coincide until something is resized, and conflating them is how a user ends up with a document
+whose pages disagree and no control that explains why.
+-->
+<div class="app__side">
+  <aside class="inspector" data-inspector></aside>
+  <aside class="pages-panel" data-pages-panel></aside>
+</div>
     </div>
 
     <script type="module" src="/src/ui/app.ts"></script>
