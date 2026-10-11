@@ -67,15 +67,22 @@ describe('the version has one owner', () => {
     // The structural half of the argument lives in `eslint.config.js`'s layer rules: `model` may not
     // import `persist`, which is precisely why the constant had to move. A test cannot check a lint
     // rule, so it is stated here instead of pretended to be verified.
-    expect(fromFormat).toBe(2);
+    expect(fromFormat).toBe(3);
     expect(MINIMUM_FORMAT_VERSION).toBeLessThan(fromFormat);
   });
 
-  it('the accepted range is contiguous and covers the current version', () => {
-    // One consequence of a *range* rather than a set, which is easy to forget when adding the next
-    // version: a gap would mean a file from that version is silently unreadable, with no message
-    // distinguishing "old" from "impossible".
+  it('the accepted range is a lower bound plus the current version', () => {
+    // Was `expect(fromFormat).toBe(MINIMUM_FORMAT_VERSION + 1)`, which asserted that exactly two
+    // versions are accepted. That is what "contiguous" meant when the range *was* two versions, and it
+    // stopped being true at version 3 rather than at any gap -- the accepted set is still {1, 2, 3},
+    // with nothing missing.
+    //
+    // The property that actually matters is that `deserialize` accepts everything between the two
+    // bounds, which it does by construction rather than from a table: it rejects `> CURRENT` and
+    // `< MIN` and reads everything else. So there is no set to check for holes in. What is worth
+    // pinning is that the lower bound is still 1 -- raising it is a compatibility decision, and one
+    // that should have to be made here rather than slipped into a constant.
     expect(MINIMUM_FORMAT_VERSION).toBe(1);
-    expect(fromFormat).toBe(MINIMUM_FORMAT_VERSION + 1);
+    expect(MINIMUM_FORMAT_VERSION).toBeLessThan(fromFormat);
   });
 });

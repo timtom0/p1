@@ -16,6 +16,7 @@ import type {
   GroupNode,
   Node,
   Page,
+  PageSize,
   ParagraphAlign,
   RichText,
   ShapeNode,
@@ -23,11 +24,22 @@ import type {
   TextStyle,
   Transform2D,
 } from './types';
-import { createTransform, createGroupNode } from './factory';
+import { createId } from '../core/ids';
+import { createTransform, createGroupNode, createPage } from './factory';
 import { normalizeRichText, richTextEqual as richTextEquals } from './rich-text';
 import { prunedAssetTable } from './assets';
-import { worldTransformIn } from './transform';
+import { worldTransformIn, pageSizeToPx as pageExtentPx } from './transform';
 import { isGroup, locateNode, mapNodesByIdIn, removeNodesById } from './tree';
+import {
+  clonePageSize,
+  createPageSetup,
+  pageSizeProblem,
+  pageSizesEqual,
+  sizeForNewPage,
+  type PageResizeBehaviour,
+  type PageSetup,
+} from './page-setup';
+import { partitionByOverflow, remapNodeIds, resizeRatio, scalePageObjects } from './page-resize';
 import type { NodeLocation } from './tree';
 
 /**
@@ -56,7 +68,49 @@ export type Command =
   | { type: 'setText'; nodeId: string; text: TextFrameNode['text'] }
   | { type: 'setTextStyle'; ids: readonly string[]; patch: TextStylePatch }
   | { type: 'setTextAlign'; nodeId: string; align: ParagraphAlign | null }
-  | { type: 'setPageProps'; pageId: string; props: Partial<Omit<Page, 'id' | 'objects'>> }
+  | { type: 'setPageProps'; pageId: string; props: PagePropsPatch }
+  // --- page management (M20) -------------------------------------------------------------------------------------
+  /**
+   * Inserts a new page, sized by the document's `pageSetup`.
+   *
+   * **The size is not in the command.** `pageSetup.fixedSize` and `defaultSize` exist precisely so
+   * that "what size is a new page" is decided in one place; a payload would let a caller restate the
+   * rule and get a different answer than the settings panel shows. The inserted page's size is derived
+   * by `sizeForNewPage` from the setup and the page it follows.
+   *
+   * `index` is where it lands, clamped into range. Omit it to append.
+   */
+  | { type: 'addPage'; index?: number }
+  /**
+   * Copies a page: new page id, new ids for **every** node in the subtree, same dimensions, same
+   * content, inserted directly after the original.
+   *
+   * Assets are *not* copied. They are document-level records keyed by id, so the duplicate's image
+   * nodes reference the same asset — which is the model's existing arrangement rather than a shared
+   * mutable identity: an `AssetRecord` is immutable and `setAssets` replaces rather than edits.
+   */
+  | { type: 'duplicatePage'; pageId: string }
+  /**
+   * Removes a page.
+   *
+   * **The last page cannot be deleted.** This returns the document unchanged rather than throwing,
+   * because `isNoop` is defined as `apply(doc, command) === doc` and a throw would take the history with
+   * it. The UI asks `canDeletePage` and disables the control instead; a silent no-op is the right
+   * residual behaviour for a keyboard shortcut or a stale menu. Same precedent as `pruneAssets`
+   * returning the same reference when there is nothing to collect.
+   */
+  | { type: 'deletePage'; pageId: string }
+  /** Moves a page to `toIndex`. Out-of-range values are clamped. */
+  | { type: 'movePage'; pageId: string; toIndex: number }
+  /**
+   * Resizes a page, applying the document's `resizeBehaviour` unless told otherwise.
+   *
+   * The policy is part of the document rather than of this command, so a user changes it once in
+   * settings and every subsequent resize obeys it. `behaviour` overrides it for one operation.
+   */
+  | { type: 'setPageSize'; pageId: string; size: PageSize; behaviour?: PageResizeBehaviour }
+  /** Changes the document's page-setup defaults. Undoable like any other edit. */
+  | { type: 'setPageSetup'; setup: Partial<PageSetup> }
   /**
    * Adds or replaces asset records, keyed by id.
    *
@@ -105,6 +159,38 @@ export type Command =
   /** Lifts each group's direct children into the group's own parent, and removes the group. */
   | { type: 'ungroup'; ids: readonly string[] }
   | { type: 'batch'; cmds: readonly Command[]; label?: string };
+
+/**
+ * A partial change to a page.
+ *
+ * **`size` is deliberately absent.** `Partial<Omit<Page, 'id' | 'objects' | 'size'>>` would let a
+ * caller resize a page through `setPageProps` and silently skip the resize policy — no scaling, no
+ * pushing — which is the one thing `setPageSize` exists to prevent. Excluding it here means the only
+ * way to change a page's dimensions is the command that knows what should happen to the content.
+ */
+/** Clamps an index into `[0, max]`, so a stale index cannot splice past the end of an array. */
+function clampIndex(index: number, max: number): number {
+  return Math.min(Math.max(index, 0), Math.max(0, max));
+}
+
+/** A copy of `list` with `index` replaced. Kept beside `apply` because three cases need it. */
+function replaceAt(list: readonly Page[], index: number, page: Page): Page[] {
+  const next = [...list];
+  next[index] = page;
+  return next;
+}
+
+/**
+ * Whether a page may be deleted.
+ *
+ * The UI asks this to disable the control. The command itself does not throw when the answer is no --
+ * see `deletePage` -- so that a stale click or a keyboard shortcut cannot take the history down with
+ * it.
+ */
+export function canDeletePage(doc: Document): boolean {
+  return doc.pages.length > 1;
+}
+export type PagePropsPatch = Partial<Omit<Page, 'id' | 'objects' | 'size'>>;
 
 /**
  * A partial change to a text frame's typography.
@@ -281,6 +367,116 @@ export function apply(doc: Document, command: Command): Document {
       );
     }
 
+    case 'addPage': {
+      const at = command.index === undefined ? doc.pages.length : clampIndex(command.index, doc.pages.length + 1);
+      // The page a new one inherits its size from when `fixedSize` is false is the one *before* it in
+      // document order -- which for an insert at index 0 is nothing, so the default applies.
+      const preceding = at > 0 ? doc.pages[at - 1] : undefined;
+      const size = sizeForNewPage(doc.pageSetup, preceding?.size ?? null);
+      const page = createPage({
+        // Named for its position, so a 40-page document reads "Page 12" rather than a name that was
+        // already taken.
+        name: `Page ${at + 1}`,
+        size,
+      });
+      const pages = [...doc.pages];
+      pages.splice(at, 0, page);
+      return { ...doc, pages };
+    }
+
+    case 'duplicatePage': {
+      const at = doc.pages.findIndex((page) => page.id === command.pageId);
+      if (at < 0) return doc;
+      const source = doc.pages[at];
+      if (source === undefined) return doc;
+      // Every node gets a fresh id, recursively. Sharing ids with the original would put two nodes in
+      // one document claiming one identity, and `mapNodesById` resolves an edit to whichever it visits
+      // first -- so editing the duplicate would edit the original.
+      const copy: Page = {
+        ...source,
+        id: createId('page'),
+        objects: source.objects.map((node) => remapNodeIds(node).node),
+      };
+      const pages = [...doc.pages];
+      pages.splice(at + 1, 0, copy);
+      return { ...doc, pages };
+    }
+
+    case 'deletePage': {
+      if (doc.pages.length <= 1) return doc;
+      const pages = doc.pages.filter((page) => page.id !== command.pageId);
+      if (pages.length === doc.pages.length) return doc;
+      return { ...doc, pages };
+    }
+
+    case 'movePage': {
+      const from = doc.pages.findIndex((page) => page.id === command.pageId);
+      if (from < 0) return doc;
+      const to = clampIndex(command.toIndex, doc.pages.length);
+      if (to === from) return doc;
+      const pages = [...doc.pages];
+      const [moved] = pages.splice(from, 1);
+      if (moved === undefined) return doc;
+      pages.splice(to, 0, moved);
+      return { ...doc, pages };
+    }
+
+    case 'setPageSize': {
+      const at = doc.pages.findIndex((page) => page.id === command.pageId);
+      if (at < 0) return doc;
+      const page = doc.pages[at];
+      if (page === undefined) return doc;
+      if (pageSizesEqual(page.size, command.size)) return doc;
+      // An invalid size is refused rather than applied. The alternative is a page that renders as
+      // nothing and prints as a blank sheet, and the model is the only place that can say so before
+      // the user finds out at export time.
+      if (pageSizeProblem(command.size) !== null) return doc;
+
+      const behaviour = command.behaviour ?? doc.pageSetup.resizeBehaviour;
+      const resized: Page = { ...page, size: clonePageSize(command.size) };
+
+      if (behaviour === 'crop') {
+        return { ...doc, pages: replaceAt(doc.pages, at, resized) };
+      }
+
+      if (behaviour === 'scale') {
+        const ratio = resizeRatio(pageExtentPx(page.size), pageExtentPx(command.size));
+        return {
+          ...doc,
+          pages: replaceAt(doc.pages, at, { ...resized, objects: scalePageObjects(page.objects, ratio) }),
+        };
+      }
+
+      // `push`: what no longer fits moves to the following page, created if this is the last one.
+      const { fits, overflows } = partitionByOverflow(page, command.size);
+      if (overflows.length === 0) {
+        return { ...doc, pages: replaceAt(doc.pages, at, { ...resized, objects: fits }) };
+      }
+      const pages = [...doc.pages];
+      pages.splice(at, 1, { ...resized, objects: fits });
+      const destination = pages[at + 1];
+      if (destination === undefined) {
+        pages.splice(at + 1, 0, {
+          ...createPage({ name: `Page ${at + 2}`, size: clonePageSize(command.size) }),
+          objects: [...overflows],
+        });
+      } else {
+        pages[at + 1] = { ...destination, objects: [...destination.objects, ...overflows] };
+      }
+      return { ...doc, pages };
+    }
+
+    case 'setPageSetup': {
+      const next = createPageSetup({ ...doc.pageSetup, ...command.setup });
+      if (
+        next.fixedSize === doc.pageSetup.fixedSize &&
+        next.resizeBehaviour === doc.pageSetup.resizeBehaviour &&
+        pageSizesEqual(next.defaultSize, doc.pageSetup.defaultSize)
+      ) {
+        return doc;
+      }
+      return { ...doc, pageSetup: next };
+    }
     case 'pruneAssets': {
         // Same no-op rule as every other command: return the *same document* so `isNoop` is true and
         // a collection with nothing to do is not an undo step. `prunedAssetTable` returns `null` for
@@ -666,7 +862,23 @@ export function describeCommand(command: Command): string {
     case 'setText':
       return 'Edit text';
     case 'setPageProps':
-      return 'Change page';
+      return 'Rename page';
+    case 'addPage':
+      return 'Add page';
+    case 'duplicatePage':
+      return 'Duplicate page';
+    case 'deletePage':
+      return 'Delete page';
+    case 'movePage':
+      return 'Reorder pages';
+    case 'setPageSize':
+      return command.behaviour === 'push'
+        ? 'Resize page and push content'
+        : command.behaviour === 'scale'
+          ? 'Resize page and scale content'
+          : 'Resize page';
+    case 'setPageSetup':
+      return 'Change page setup';
     case 'pruneAssets':
       // Past tense, like every label here: this is what the Edit menu says *after* the fact.
       return 'Clean up unused images';
