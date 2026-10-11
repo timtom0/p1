@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { documentsEqual } from '../../src/model/document-equality';
+import { createPageSetup } from '../../src/model/page-setup';
 import {
   createDocument,
   createPage,
@@ -52,7 +53,7 @@ import {
   DocumentParseError,
 } from '../../src/persist/format';
 
-const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample.p1doc', import.meta.url));
+const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample-v3.p1doc', import.meta.url));
 const HANDWRITTEN_PATH = fileURLToPath(new URL('../golden/handwritten.p1doc', import.meta.url));
 const FIXTURE_TEXT = readFileSync(FIXTURE_PATH, 'utf8');
 
@@ -505,9 +506,9 @@ describe('determinism', () => {
       formatVersion: CURRENT_FORMAT_VERSION,
       id: 'doc_1',
       name: 'Key order',
-      pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      pageSetup: createPageSetup({ defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' } }),
       assets: {},
-      pages: [{ id: 'page_1', name: 'P', background: { type: 'solid', color: '#ffffff' }, objects }],
+      pages: [{ id: 'page_1', name: 'P', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects }],
     });
     const ordered = withNode([node]);
     const reversed = withNode([shuffled]);
@@ -540,12 +541,13 @@ describe('ids', () => {
       formatVersion: CURRENT_FORMAT_VERSION,
       id: 'doc_9',
       name: 'Ids',
-      pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      pageSetup: createPageSetup({ defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' } }),
       assets: {},
       pages: [
         {
           id: 'page_4',
           name: '1',
+          size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [
             {

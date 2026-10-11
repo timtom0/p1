@@ -29,13 +29,23 @@ interface Harness {
   readZoom(): number;
 }
 
-/** Content descriptor. The stack height is derived by the viewport from the gap. */
+/**
+ * Content descriptor for a stack of `pageCount` identical pages.
+ *
+ * The viewport takes **each page's extent** now rather than one width, one height and a count, so a
+ * uniform stack is an array of identical boxes. It reduces to the old arithmetic exactly -- the stack
+ * height is still derived from the heights and the gap, by summation rather than multiplication --
+ * which is what lets every assertion below keep its number.
+ *
+ * `pagesOf` covers the mixed case, which the old shape could not express at all.
+ */
 function content(pageCount = 1): ViewportContent {
-  return {
-    pageWidth: PAGE.width,
-    pageHeight: PAGE.height,
-    pageCount,
-  };
+  return { pages: Array.from({ length: pageCount }, () => PAGE) };
+}
+
+/** A stack of pages with the given heights, all the same width. */
+function pagesOf(heights: number[]): ViewportContent {
+  return { pages: heights.map((height) => ({ width: PAGE.width, height })) };
 }
 
 function mount(options: { minZoom?: number; maxZoom?: number; fitPadding?: number } = {}): Harness {
@@ -353,6 +363,50 @@ describe('coordinate spaces', () => {
     viewport.setZoom(4);
     expect(viewport.pageOffsetY(2)).toBeCloseTo(atOne, 9);
     expect(atOne).toBeCloseTo(2 * (PAGE.height + GAP), 6);
+  });
+});
+
+describe('a stack of differently sized pages', () => {
+  // The shape ViewportContent could not express before M20: one width, one height, a count. These
+  // are the assertions that would have been impossible to write against the old signature, which is
+  // the point -- a viewport that assumed one page size could not be tested for mixed sizes at all.
+  const SHORT = { width: PAGE.width, height: PAGE.height / 2 };
+
+  it('offsets later pages by the heights that actually precede them', () => {
+    const { viewport } = mount();
+    viewport.setContent(pagesOf([PAGE.height, SHORT.height, PAGE.height]), GAP);
+
+    expect(viewport.pageOffsetY(0)).toBe(0);
+    expect(viewport.pageOffsetY(1)).toBeCloseTo(PAGE.height + GAP, 6);
+    expect(viewport.pageOffsetY(2)).toBeCloseTo(PAGE.height + GAP + SHORT.height + GAP, 6);
+  });
+
+  it('finds the page a y offset lands on', () => {
+    const { viewport } = mount();
+    viewport.setContent(pagesOf([PAGE.height, SHORT.height, PAGE.height]), GAP);
+
+    // Inside the short page, which a uniform stride would have placed on the page after it.
+    expect(viewport.pageIndexAt(PAGE.height + GAP + SHORT.height / 2)).toBe(1);
+    // And inside the gap after it, which is not any page.
+    expect(viewport.pageIndexAt(PAGE.height + GAP + SHORT.height + 4)).toBeNull();
+  });
+
+  it('sizes the scroll extent from every page, not the first', () => {
+    const { canvas, viewport } = mount();
+    viewport.setContent(pagesOf([PAGE.height, SHORT.height, PAGE.height]), GAP);
+    viewport.setZoom(1);
+
+    const expected = (2 * PAGE.height + SHORT.height + 2 * GAP) * viewport.zoom;
+    expect(parseFloat(canvas.style.height)).toBeCloseTo(expected, 3);
+  });
+
+  it('is as wide as its widest page', () => {
+    const { canvas, viewport } = mount();
+    viewport.setContent({
+      pages: [PAGE, { width: PAGE.width * 2, height: PAGE.height }],
+    }, GAP);
+    viewport.setZoom(1);
+    expect(parseFloat(canvas.style.width)).toBeCloseTo(PAGE.width * 2 * viewport.zoom, 3);
   });
 });
 

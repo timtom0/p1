@@ -18,7 +18,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { printProfileCss, printSheetSize } from './print-profile';
+import { printProfileCss, printSheetSize, namedPageProfileCss } from './print-profile';
+import { printPageName } from '../model/page';
 import { pageExtentPx } from '../model/page';
 import { fromPx } from '../core/units/units';
 import type { PageSize } from '../model/types';
@@ -86,7 +87,14 @@ describe('printProfileCss', () => {
   it('declares the sheet and zeroes the margin', () => {
     // `margin: 0` is what makes "one document page per sheet" true: with the browser's default page
     // margin, a full-size page element is shrunk to fit inside it and every sheet gets a border.
-    expect(printProfileCss(size(210, 297, 'mm'))).toBe('@page { size: 210mm 297mm; margin: 0; }');
+    //
+    // The rule is **named** (`@page p0`) since M20, because a bare `@page { size }` applies to every
+    // sheet and would print a mixed-size document entirely on the first page's paper. A bare fallback
+    // rule follows it for any element whose `page` name did not match -- which should be impossible,
+    // and is asserted against a real generated PDF in the browser suite.
+    expect(printProfileCss(size(210, 297, 'mm'))).toBe(
+      '@page p0 { size: 210mm 297mm; margin: 0; }\n@page { size: 210mm 297mm; margin: 0; }',
+    );
   });
 
   it('is scoped to the sheet, so it cannot restyle the editor', () => {
@@ -97,5 +105,32 @@ describe('printProfileCss', () => {
     expect(css).not.toContain('.toolbar');
     expect(css).not.toContain('.page');
     expect(css).not.toContain('color');
+  });
+
+  it('declares one named rule per page, each at that page own size', () => {
+    // The mixed-size case, which is the whole reason the rules are named. Two pages of different paper
+    // must produce two rules, and the names must be the indices the renderer binds elements to
+    // (`printPageName`) -- or an element references a rule that was never declared and silently
+    // prints at the fallback size.
+    const css = namedPageProfileCss([size(210, 297, 'mm'), size(148, 210, 'mm')]);
+    expect(css).toContain('@page p0 { size: 210mm 297mm; margin: 0; }');
+    expect(css).toContain('@page p1 { size: 148mm 210mm; margin: 0; }');
+    expect(printPageName(0)).toBe('p0');
+    expect(printPageName(1)).toBe('p1');
+  });
+
+  it('falls back to the first page size for an element with no matching rule', () => {
+    const css = namedPageProfileCss([size(148, 210, 'mm'), size(210, 297, 'mm')]);
+    // The bare `@page` is emitted last so it cannot shadow a named rule, and carries page 0's size.
+    expect(css.endsWith('@page { size: 148mm 210mm; margin: 0; }')).toBe(true);
+  });
+
+  it('repeats the rule for identical pages rather than de-duplicating by value', () => {
+    // De-duplicating would make the rule that fires for page *n* depend on an equality test a later
+    // change could get subtly wrong, turning a 40-page document into 40 sheets of the wrong paper. A
+    // few bytes of CSS is not worth that.
+    const css = namedPageProfileCss([size(210, 297, 'mm'), size(210, 297, 'mm')]);
+    expect(css).toContain('@page p0');
+    expect(css).toContain('@page p1');
   });
 });

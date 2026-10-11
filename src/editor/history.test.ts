@@ -17,6 +17,7 @@ function makeDoc(): Document {
   const page = (id: string, objects: Page['objects']): Page => ({
     id,
     name: id,
+    size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects,
   });

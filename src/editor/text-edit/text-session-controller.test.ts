@@ -32,6 +32,7 @@ function makeDoc(text = 'Hello'): Document {
       {
         id: 'p1',
         name: 'p1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           createTextFrameNode({

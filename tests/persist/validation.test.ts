@@ -45,13 +45,33 @@ import type { PersistedDocument } from '../../src/persist/format';
 // twenty opportunities for a test to be testing a typo.
 // ---------------------------------------------------------------------------
 
+/**
+ * A **version-1/2** document: one `pageSize` for the whole thing and no per-page `size`.
+ *
+ * Needed because `validDocument()` now describes version 3. Stamping that fixture with an old
+ * `formatVersion` does not make it an old document -- it makes it an *invalid* one, since version 3
+ * refuses `pageSize` outright. Testing the migration needs a document that is actually the old shape.
+ */
+function legacyDocument(formatVersion: number = MINIMUM_FORMAT_VERSION): Record<string, unknown> {
+  const current = validDocument();
+  delete current['pageSetup'];
+  current['formatVersion'] = formatVersion;
+  current['pageSize'] = { width: 210, height: 297, unit: 'mm', orientation: 'portrait' };
+  const pages = current['pages'] as Record<string, unknown>[];
+  for (const page of pages) delete page['size'];
+  return current;
+}
 function validDocument(): Record<string, unknown> {
   return {
     format: DOCUMENT_FORMAT,
     formatVersion: CURRENT_FORMAT_VERSION,
     id: 'doc_1',
     name: 'Valid',
-    pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+    pageSetup: {
+      fixedSize: true,
+      defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      resizeBehaviour: 'crop',
+    },
     assets: {
       asset_1: {
         kind: 'image',
@@ -65,6 +85,7 @@ function validDocument(): Record<string, unknown> {
       {
         id: 'page_1',
         name: '1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           {
@@ -248,7 +269,7 @@ describe('the version', () => {
     // `parse` takes parsed JSON, not a file name, so the version read is whatever the input says.
     // A version-1 document is read normally and comes back stamped `2` — a re-stamp, which is the
     // only difference, since a version-1 document has no `children` array anywhere to convert.
-    const parsed = parse(withField('formatVersion', MINIMUM_FORMAT_VERSION));
+    const parsed = parse(legacyDocument());
     expect(parsed.formatVersion).toBe(CURRENT_FORMAT_VERSION);
     expect(parsed.pages.length).toBeGreaterThan(0);
     // Nothing was defaulted in: the node count and the asset table are exactly what was authored.
@@ -267,7 +288,7 @@ describe('the version', () => {
     // version check on that build's side, which this build can only mirror in the other direction.
     // So the test here is the half that is observable: the group survives the re-stamp, rather than
     // being dropped because the stamp looked old.
-    const withGroup = withField('formatVersion', MINIMUM_FORMAT_VERSION);
+    const withGroup = legacyDocument(CURRENT_FORMAT_VERSION - 1);
     const pages = withGroup['pages'] as { objects: Record<string, unknown>[] }[];
     const page = pages[0];
     if (page === undefined) throw new Error('the builder produced no pages');
@@ -305,7 +326,7 @@ describe('the version', () => {
 // ---------------------------------------------------------------------------
 
 describe('required fields', () => {
-  it.each(['id', 'name', 'pageSize', 'assets', 'pages'])('refuses a missing %s', (field) => {
+  it.each(['id', 'name', 'pageSetup', 'assets', 'pages'])('refuses a missing %s', (field) => {
     expectRefusal(withoutField(field), field);
   });
 
@@ -324,27 +345,27 @@ describe('required fields', () => {
 
 describe('page size', () => {
   it('refuses a zero or negative dimension', () => {
-    expectRefusal(withField('pageSize/width', 0), 'pageSize.width');
-    expectRefusal(withField('pageSize/height', -1), 'pageSize.height');
+    expectRefusal(withField('pages/0/size/width', 0), 'pages[0].size.width');
+    expectRefusal(withField('pages/0/size/height', -1), 'pages[0].size.height');
   });
 
   it('refuses `px`, which is not a physical unit', () => {
     // A document authored in px has no defined print size, and the field is a *physical*
     // unit precisely so "A4" survives a round trip.
-    const error = expectRefusal(withField('pageSize/unit', 'px'), 'pageSize.unit');
+    const error = expectRefusal(withField('pages/0/size/unit', 'px'), 'pages[0].size.unit');
     expect(error.message).toContain('physical unit');
   });
 
   it('refuses an unknown unit', () => {
-    expectRefusal(withField('pageSize/unit', 'furlong'), 'pageSize.unit');
+    expectRefusal(withField('pages/0/size/unit', 'furlong'), 'pages[0].size.unit');
   });
 
   it('refuses an unknown orientation', () => {
-    expectRefusal(withField('pageSize/orientation', 'sideways'), 'pageSize.orientation');
+    expectRefusal(withField('pages/0/size/orientation', 'sideways'), 'pages[0].size.orientation');
   });
 
   it('refuses an undeclared field', () => {
-    expectRefusal(withField('pageSize/margins', {}), 'pageSize.margins');
+    expectRefusal(withField('pages/0/size/margins', {}), 'pages[0].size.margins');
   });
 });
 

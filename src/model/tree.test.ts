@@ -34,6 +34,7 @@ import { worldMatrix } from './transform';
 import { applyPoint, invert } from '../core/geom/mat2d';
 import { createTransform } from './factory';
 import { CURRENT_FORMAT_VERSION } from './factory';
+import { createPageSetup } from './page-setup';
 import type { Document, GroupNode, Node, Page, ShapeNode, Transform2D } from './types';
 import { validateDocument } from './invariants';
 
@@ -122,6 +123,7 @@ function page(id: string, objects: Node[]): Page {
   return {
     id,
     name: id,
+    size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
     background: { type: 'solid', color: '#ffffff' },
     objects,
   };
@@ -132,7 +134,7 @@ function doc(id: string, pages: Page[]): Document {
     formatVersion: CURRENT_FORMAT_VERSION,
     id,
     name: id,
-    pageSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+    pageSetup: createPageSetup({ defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' } }),
     assets: {},
     pages,
   };

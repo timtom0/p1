@@ -97,12 +97,17 @@ function documentWith(objects: unknown[], assets: Record<string, unknown> = {}):
     formatVersion: CURRENT_FORMAT_VERSION,
     id: 'doc_1',
     name: 'Groups',
-    pageSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+    pageSetup: {
+      fixedSize: true,
+      defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+      resizeBehaviour: 'crop',
+    },
     assets,
     pages: [
       {
         id: 'p1',
         name: '1',
+        size: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects,
       },
@@ -328,18 +333,29 @@ describe('the version', () => {
     expect(serializeToString(doc)).toContain(`"formatVersion": ${CURRENT_FORMAT_VERSION}`);
   });
 
-  it('reads the previous version and re-stamps it, which is not a migration', () => {
-    // ADR 0007 said "no migrations". This is the case that could have broken that, and it does not:
-    // a version-1 document has no groups, so nothing is converted, defaulted or dropped. The only
-    // difference is the stamp.
-    const previous = {
-      ...(documentWith([leaf('a')]) as unknown as Record<string, unknown>),
-      formatVersion: MINIMUM_FORMAT_VERSION,
-    };
+  it('reads a version-1 document, re-stamping it and deriving its page size', () => {
+    // Was "re-stamps it, which is not a migration". That was true while every accepted version was
+    // a strict subset of the current one, and version 3 stopped that being so: a version-1 file has
+    // one pageSize and no per-page size, so reading one *derives* a field the file does not
+    // contain. That is a migration, and it is this project's first. See ADR 0019, and the corrected
+    // note above MINIMUM_FORMAT_VERSION.
+    //
+    // What is asserted is the whole of it: the group survives, the version comes back current, and
+    // every page's size came from the document's -- preserved exactly, which is the property that
+    // matters for a file someone is about to print.
+    const modern = documentWith([leaf('a')]) as unknown as Record<string, unknown>;
+    const pages = modern['pages'] as Record<string, unknown>[];
+    const legacySize = { width: 400, height: 300, unit: 'pt', orientation: 'portrait' };
+    for (const page of pages) delete page['size'];
+    delete modern['pageSetup'];
+    const previous = { ...modern, formatVersion: MINIMUM_FORMAT_VERSION, pageSize: legacySize };
+
     const parsed = parse(previous as unknown as PersistedDocument);
     expect(parsed.formatVersion).toBe(CURRENT_FORMAT_VERSION);
     expect(parsed.pages[0]?.objects).toHaveLength(1);
     expect(parsed.assets).toEqual({});
+    expect(parsed.pages[0]?.size).toEqual(legacySize);
+    expect(parsed.pageSetup.fixedSize).toBe(true);
   });
 
   it('refuses anything below the oldest version it reads, as an older file', () => {

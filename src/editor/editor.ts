@@ -1431,7 +1431,7 @@ export class Editor {
     return computeSnap({
       moving,
       pageId,
-      pageRect: pageSnapRect({ pageSize: page.size }),
+      pageRect: pageSnapRect(page.size),
       // Excluding the selection by id is also what prevents self-snapping, and it removes a selected
       // group's contents too, since a selection never contains both a node and one of its descendants.
       others: snapTargetsFor(this.doc, start.keys()),

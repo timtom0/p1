@@ -19,6 +19,7 @@ import { createDocument, createRectNode, createShapeNode, createTransform } from
 const page = (objects: Page['objects']): Page => ({
   id: 'p1',
   name: '1',
+  size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
   background: { type: 'solid', color: '#ffffff' },
   objects,
 });

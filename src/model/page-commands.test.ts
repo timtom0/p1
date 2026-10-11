@@ -69,10 +69,8 @@ function richPage(id = 'page_1'): Page {
     name: 'Inner',
     transform: createTransform({ x: 20, y: 20, width: 40, height: 40 }),
   });
-  return createPage({
-    id,
+  return page(id, {
     name: 'Cover',
-    size: A4,
     objects: [
       createRectNode({
         name: 'Rect',
@@ -93,6 +91,24 @@ function richPage(id = 'page_1'): Page {
   });
 }
 
+/**
+ * A page literal with a known id.
+ *
+ * Built by hand rather than through `createPage`, which mints its own id and deliberately does not
+ * accept one -- an id that comes from the generator is what stops a hand-written id colliding with a
+ * loaded document. Tests need *named* pages to address them with, and the existing suites
+ * (`tree.test.ts`) already build literals for exactly this reason.
+ */
+function page(id: string, init: Partial<Omit<Page, 'id' | 'size'>> = {}): Page {
+  return {
+    id,
+    name: id,
+    size: A4,
+    background: { type: 'solid', color: '#ffffff' },
+    objects: [],
+    ...init,
+  };
+}
 function doc(...pages: Page[]): Document {
   return createDocument({ pages: pages.length > 0 ? pages : [createPage({ size: A4 })] });
 }
@@ -106,12 +122,12 @@ describe('addPage', () => {
   });
 
   it('inserts at an index', () => {
-    const after = run(doc(richPage('a'), createPage({ id: 'b', size: A4 })), { type: 'addPage', index: 0 });
+    const after = run(doc(richPage('a'), page('b')), { type: 'addPage', index: 0 });
     expect(after.pages.map((p) => p.id)).toEqual([after.pages[0]!.id, 'a', 'b']);
   });
 
   it('clamps an out-of-range index rather than splicing past the end', () => {
-    const after = run(doc(createPage({ id: 'a', size: A4 })), { type: 'addPage', index: 99 });
+    const after = run(doc(page('a')), { type: 'addPage', index: 99 });
     expect(after.pages).toHaveLength(2);
   });
 
@@ -166,10 +182,10 @@ describe('the fixed-size page setup', () => {
 
   it('produces a mixed document as soon as one page is resized', () => {
     // The point of the split: `fixedSize` governs the *next* page, not a claim about all of them.
-    const page = createPage({ size: A4 });
+    const first = createPage({ size: A4 });
     const d = run(
-      createDocument({ pages: [page], fixedSize: true }),
-      { type: 'setPageSize', pageId: page.id, size: A5 },
+      createDocument({ pages: [first], fixedSize: true }),
+      { type: 'setPageSize', pageId: first.id, size: A5 },
     );
     expect(pageSizesEqual(d.pages[0]!.size, A5)).toBe(true);
     expect(d.pageSetup.fixedSize).toBe(true);
@@ -178,7 +194,7 @@ describe('the fixed-size page setup', () => {
 
 describe('duplicatePage', () => {
   it('inserts the copy directly after the original', () => {
-    const after = apply(doc(richPage('a'), createPage({ id: 'b', size: A4 })), {
+    const after = apply(doc(richPage('a'), page('b')), {
       type: 'duplicatePage',
       pageId: 'a',
     });
@@ -227,7 +243,7 @@ describe('duplicatePage', () => {
 
 describe('deletePage', () => {
   it('removes the page', () => {
-    const after = apply(doc(createPage({ id: 'a', size: A4 }), createPage({ id: 'b', size: A4 })), {
+    const after = apply(doc(page('a'), page('b')), {
       type: 'deletePage',
       pageId: 'a',
     });
@@ -235,20 +251,20 @@ describe('deletePage', () => {
   });
 
   it('refuses to remove the last page', () => {
-    const before = doc(createPage({ id: 'a', size: A4 }));
+    const before = doc(page('a'));
     expect(apply(before, { type: 'deletePage', pageId: 'a' })).toBe(before);
     expect(isNoop(before, { type: 'deletePage', pageId: 'a' })).toBe(true);
   });
 
   it('reports the minimum through canDeletePage', () => {
-    expect(canDeletePage(doc(createPage({ id: 'a', size: A4 })))).toBe(false);
-    expect(canDeletePage(doc(createPage({ id: 'a', size: A4 }), createPage({ id: 'b', size: A4 })))).toBe(true);
+    expect(canDeletePage(doc(page('a')))).toBe(false);
+    expect(canDeletePage(doc(page('a'), page('b')))).toBe(true);
   });
 });
 
 describe('movePage', () => {
   const three = () =>
-    doc(createPage({ id: 'a', size: A4 }), createPage({ id: 'b', size: A4 }), createPage({ id: 'c', size: A4 }));
+    doc(page('a'), page('b'), page('c'));
 
   it('reorders', () => {
     const after = apply(three(), { type: 'movePage', pageId: 'a', toIndex: 2 });
@@ -263,7 +279,7 @@ describe('movePage', () => {
 
 describe('renamePage, through setPageProps', () => {
   it('renames without touching the size', () => {
-    const after = apply(doc(createPage({ id: 'a', size: A4 })), {
+    const after = apply(doc(page('a')), {
       type: 'setPageProps',
       pageId: 'a',
       props: { name: 'Cover' },
@@ -275,7 +291,8 @@ describe('renamePage, through setPageProps', () => {
   it('cannot be used to resize, which would skip the resize policy', () => {
     // `PagePropsPatch` omits `size` at the type level. The runtime assertion below is the belt: a
     // caller who casts their way past the type must not be able to resize without a policy either.
-    const after = apply(doc(createPage({ id: 'a', size: A4, objects: [createRectNode()] })), {
+    const after = apply(doc(page('a', {
+        objects: [createRectNode()] })), {
       type: 'setPageProps',
       pageId: 'a',
       props: { size: A5 } as never,
@@ -319,10 +336,8 @@ describe('setPageSize -- scale', () => {
 
   it('leaves rotation and the scale factors alone', () => {
     // Scaling the scale factors as well would be scaling twice; see `scaleTransform`.
-    const rotated = createPage({
-      id: 'a',
-      size: A4,
-      objects: [
+    const rotated = page('a', {
+        objects: [
         createRectNode({
           transform: createTransform({ x: 10, y: 10, width: 50, height: 50, rotation: 0.7, scaleX: 2 }),
         }),
@@ -375,15 +390,13 @@ describe('setPageSize -- push', () => {
 
   const withOverflow = () =>
     doc(
-      createPage({
-        id: 'a',
-        size: A4,
+      page('a', {
         objects: [
           createRectNode({ transform: createTransform({ x: 10, y: 10, width: 50, height: 50 }) }),
           createRectNode({ transform: createTransform({ x: 10, y: bottomY, width: 50, height: 30 }) }),
         ],
       }),
-      createPage({ id: 'b', size: A4 }),
+      page('b'),
     );
 
   it('moves what no longer fits to the next page', () => {
@@ -404,9 +417,7 @@ describe('setPageSize -- push', () => {
 
   it('creates a following page when the resized page was the last', () => {
     const single = doc(
-      createPage({
-        id: 'a',
-        size: A4,
+      page('a', {
         objects: [createRectNode({ transform: createTransform({ x: 10, y: bottomY, width: 50, height: 30 }) })],
       }),
     );
@@ -417,9 +428,7 @@ describe('setPageSize -- push', () => {
 
   it('moves nothing when everything still fits', () => {
     const fits = doc(
-      createPage({
-        id: 'a',
-        size: A4,
+      page('a', {
         objects: [createRectNode({ transform: createTransform({ x: 10, y: 10, width: 50, height: 50 }) })],
       }),
     );
@@ -431,13 +440,11 @@ describe('setPageSize -- push', () => {
   it('does not cascade: a page whose content is pushed on to is not itself re-pushed', () => {
     // One hop, deliberately. Cascading would make one resize edit an unbounded number of pages.
     const threePages = doc(
-      createPage({ id: 'a', size: A4 }),
-      createPage({
-        id: 'b',
-        size: A4,
+      page('a'),
+      page('', {
         objects: [createRectNode({ transform: createTransform({ x: 10, y: bottomY, width: 50, height: 30 }) })],
       }),
-      createPage({ id: 'c', size: A4 }),
+      page('a'),
     );
     const after = apply(threePages, { type: 'setPageSize', pageId: 'a', size: A5, behaviour: 'push' });
     expect(after.pages).toHaveLength(3);
@@ -445,9 +452,7 @@ describe('setPageSize -- push', () => {
 
   it('judges a group by where it paints, and moves its children with it', () => {
     const d = doc(
-      createPage({
-        id: 'a',
-        size: A4,
+      page('a', {
         objects: [
           createGroupNode({
             transform: createTransform({ x: 10, y: bottomY, width: 100, height: 80 }),
@@ -455,7 +460,7 @@ describe('setPageSize -- push', () => {
           }),
         ],
       }),
-      createPage({ id: 'b', size: A4 }),
+      page('a'),
     );
     const after = apply(d, { type: 'setPageSize', pageId: 'a', size: A5, behaviour: 'push' });
     expect(after.pages[0]!.objects).toHaveLength(0);
@@ -466,18 +471,18 @@ describe('setPageSize -- push', () => {
 
 describe('setPageSize -- refusals and no-ops', () => {
   it('is a no-op when the size is unchanged', () => {
-    const before = doc(createPage({ id: 'a', size: A4 }));
+    const before = doc(page('a'));
     expect(apply(before, { type: 'setPageSize', pageId: 'a', size: A4 })).toBe(before);
   });
 
   it('refuses a size outside the printable range', () => {
-    const before = doc(createPage({ id: 'a', size: A4 }));
+    const before = doc(page('a'));
     const bad: PageSize = { width: 0.01, height: 297, unit: 'mm', orientation: 'portrait' };
     expect(apply(before, { type: 'setPageSize', pageId: 'a', size: bad })).toBe(before);
   });
 
   it('does not treat a rotated size as the same size', () => {
-    const before = doc(createPage({ id: 'a', size: A4 }));
+    const before = doc(page('a'));
     const rotated: PageSize = { ...A4, orientation: 'landscape' };
     expect(apply(before, { type: 'setPageSize', pageId: 'a', size: rotated })).not.toBe(before);
   });
@@ -508,7 +513,7 @@ describe('setPageSetup', () => {
 
 describe('immutability', () => {
   it('never mutates the document it was given', () => {
-    const before = doc(richPage('a'), createPage({ id: 'b', size: A4 }));
+    const before = doc(richPage('a'), page('b'));
     const snapshot = JSON.stringify(before);
     run(
       before,

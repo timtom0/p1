@@ -21,6 +21,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { CURRENT_FORMAT_VERSION } from './factory';
+import { createPageSetup } from './page-setup';
 
 import {
   computeSnap,
@@ -73,15 +75,34 @@ const group = (
     children,
   }) as GroupNode;
 
+/**
+ * A one-page document whose page is `pageWidth` x `pageHeight` **px**.
+ *
+ * Expressed in points because `PageSize.unit` is a `PhysicalUnit` and `px` is not one -- a page has a
+ * defined print size or it has no meaning, which is the rule `format.ts` enforces on load. The
+ * conversion below is exact in both directions (72/96), so the page is precisely the number of px the
+ * caller asked for.
+ *
+ * It used to build a document with `pageSize: { unit: 'px' }` behind an `as unknown as Document`
+ * cast. The cast was hiding a value the real parser would have refused, and it is gone: the size is
+ * now on the page, where it is legal.
+ */
+const PT_PER_PX = 72 / 96;
 const docOf = (objects: unknown[], pageWidth = 500, pageHeight = 400): Document =>
   ({
-    formatVersion: 2,
+    formatVersion: CURRENT_FORMAT_VERSION,
     id: 'd',
     name: 'D',
-    pageSize: { width: pageWidth, height: pageHeight, unit: 'px', orientation: 'portrait' },
+    pageSetup: createPageSetup(),
     assets: {},
     pages: [
-      { id: 'p1', name: '1', background: { type: 'solid', color: '#ffffff' }, objects },
+      {
+        id: 'p1',
+        name: '1',
+        size: { width: pageWidth * PT_PER_PX, height: pageHeight * PT_PER_PX, unit: 'pt', orientation: 'portrait' },
+        background: { type: 'solid', color: '#ffffff' },
+        objects,
+      },
     ],
   }) as unknown as Document;
 
@@ -637,6 +658,6 @@ describe('a multi-selection moves as one arrangement', () => {
 describe('pageSnapRect', () => {
   it('is the page extent at the origin, in px', () => {
     const doc = docOf([], 500, 400);
-    expect(pageSnapRect(doc)).toEqual({ x: 0, y: 0, width: 500, height: 400 });
+    expect(pageSnapRect(doc.pages[0]!.size)).toEqual({ x: 0, y: 0, width: 500, height: 400 });
   });
 });

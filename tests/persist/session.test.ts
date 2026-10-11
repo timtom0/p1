@@ -144,12 +144,17 @@ function persisted(overrides: Record<string, unknown> = {}): string {
     formatVersion: CURRENT_FORMAT_VERSION,
     id: 'doc_x',
     name: 'X',
-    pageSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+    pageSetup: {
+      fixedSize: true,
+      defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      resizeBehaviour: 'crop',
+    },
     assets: {},
     pages: [
       {
         id: 'page_1',
         name: '1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [],
       },
@@ -443,6 +448,7 @@ describe('open', () => {
         {
           id: 'page_1',
           name: '1',
+          size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [{ type: 'sticker', id: 'node_1', name: 'S' }],
         },
@@ -461,6 +467,7 @@ describe('open', () => {
         {
           id: 'page_1',
           name: '1',
+          size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [
             {
@@ -490,6 +497,7 @@ describe('open', () => {
         {
           id: 'page_1',
           name: '1',
+          size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
           background: { type: 'solid', color: '#ffffff' },
           objects: [
             {

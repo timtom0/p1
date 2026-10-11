@@ -292,7 +292,7 @@ export function snapTargetsFor(doc: Document, exclude: Iterable<string>): Arrang
 }
 
 /** The page's own box, which is where the page-edge candidates come from. */
-export function pageSnapRect(page: { readonly pageSize: PageSize }): Rect {
-  const extent = pageExtentPx(page.pageSize);
+export function pageSnapRect(size: PageSize): Rect {
+  const extent = pageExtentPx(size);
   return { x: 0, y: 0, width: extent.width, height: extent.height };
 }

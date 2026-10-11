@@ -20,7 +20,8 @@ import { describe, expect, it } from 'vitest';
 
 import { localToParent, worldMatrix, worldMatrixIn, worldTransformIn } from './transform';
 import { applyPoint, invert } from '../core/geom/mat2d';
-import { createTransform } from './factory';
+import { createTransform, CURRENT_FORMAT_VERSION } from './factory';
+import { createPageSetup } from './page-setup';
 import type { Document, GroupNode, Node, ShapeNode, Transform2D } from './types';
 import { placementOf } from './tree';
 import { validateDocument } from './invariants';
@@ -61,13 +62,13 @@ function group(id: string, children: Node[], transform: Transform2D): GroupNode 
 
 function docWith(objects: Node[]): Document {
   return {
-    formatVersion: 2,
+    formatVersion: CURRENT_FORMAT_VERSION,
     id: 'doc',
     name: 'doc',
-    pageSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
+    pageSetup: createPageSetup({ defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' } }),
     assets: {},
     pages: [
-      { id: 'p1', name: '1', background: { type: 'solid', color: '#ffffff' }, objects },
+      { id: 'p1', name: '1', size: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects },
     ],
   };
 }
