@@ -769,9 +769,13 @@ Add-Mutation 'the print sheet ignores orientation, so landscape prints portrait'
   { param($t) $t.Replace('  const extent = pageExtentPx(size);', '  const extent = { width: size.width, height: size.height };') } `
   'src/ui/print-profile.test.ts'
 
+# M20 replaced the single `@page` rule with one *named* rule per sheet, so this site had to move with
+# it. While it was stale the runner reported "mutation site not found" and refused to count it -- which
+# is the correct outcome, and is the reason this corpus is worth having: a mutant that no longer applies
+# is not a pass. Do not "fix" this by loosening the pattern into one that matches anything.
 Add-Mutation 'the injected @page rule drops margin: 0, so every sheet gains a default margin' `
   'src\ui\print-profile.ts' `
-  { param($t) $t.Replace('return `@page { size: ${printSheetSize(size)}; margin: 0; }`;', 'return `@page { size: ${printSheetSize(size)}; }`;') } `
+  { param($t) $t.Replace('`@page ${printPageName(index)} { size: ${printSheetSize(size)}; margin: 0; }`', '`@page ${printPageName(index)} { size: ${printSheetSize(size)} }`') } `
   'src/ui/print-profile.test.ts'
 
 Add-Mutation 'the print stylesheet leaves the editor toolbar in the output' `
