@@ -96,6 +96,85 @@ export const FIT_PADDING = 48;
 export const BOOT_TIMEOUT_MS = 15_000;
 
 /**
+ * What went wrong on the page, kept in the order it happened.
+ *
+ * **`thrown` and `logged` are separated because they mean different things.** An uncaught
+ * exception stops the boot; a `console.error` does not. Treating them alike would fail fast on
+ * `Document invariant violations: [...]`, which the product emits as advice and several specs
+ * provoke deliberately. Treating them as alike is also what made the original defect invisible:
+ * every failure read as a timeout, so a fixture missing a required field, a genuine hang, and a
+ * machine under load were one indistinguishable symptom.
+ */
+export interface PageFailures {
+  /** Uncaught exceptions. Fatal: the boot cannot continue past one. */
+  readonly thrown: string[];
+  /** `console.error` output. Advisory -- recorded, never fatal. */
+  readonly logged: string[];
+  /** Requests the browser could not make. */
+  readonly requests: string[];
+  /**
+   * Resolves with the first uncaught exception.
+   *
+   * Never rejects, and never resolves on its own if nothing throws -- it exists to be raced
+   * against the boot signal so a thrown fixture fails in the time it takes to boot rather than
+   * in `BOOT_TIMEOUT_MS`.
+   */
+  readonly firstThrown: Promise<string>;
+}
+
+/**
+ * Starts recording page failures. **Call this before navigating.**
+ *
+ * This is the whole defect. The listeners used to be attached inside `waitForApp`, which runs
+ * *after* `page.goto('/')` -- and the app boots during `goto`. Every error raised while booting had
+ * therefore already fired before anything was listening, so the failure report read
+ * `page errors: (none reported)` and pointed at a timeout for what was in fact a thrown exception.
+ *
+ * That is not a cosmetic gap in a diagnostic message. It is why seven fixture pages missing
+ * `Page.size` surfaced as 83 identical "did not reach boot:complete within 15s" failures across
+ * four unrelated specs, and why the first reading of them was a slow machine.
+ */
+export function collectPageFailures(page: Page): PageFailures {
+  const thrown: string[] = [];
+  const logged: string[] = [];
+  const requests: string[] = [];
+
+  let signalFirst: (message: string) => void = () => {};
+  const firstThrown = new Promise<string>((resolve) => {
+    signalFirst = resolve;
+  });
+
+  page.on('pageerror', (error) => {
+    const message = `pageerror: ${error.message}`;
+    thrown.push(message);
+    // Resolve only the first, so a late duplicate cannot mask the exception that stopped boot.
+    if (thrown.length === 1) signalFirst(message);
+  });
+  page.on('console', (message) => {
+    if (message.type() === 'error') logged.push(`console.error: ${message.text()}`);
+  });
+  page.on('requestfailed', (request) => {
+    requests.push(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`);
+  });
+
+  return { thrown, logged, requests, firstThrown };
+}
+
+/** Everything recorded, formatted for a failure message. */
+function describeFailures(failures: PageFailures): string {
+  const lines = [...failures.thrown, ...failures.logged, ...failures.requests];
+  if (lines.length === 0) return '(none reported)';
+  return lines
+    .slice(0, 8)
+    .map((line) => `  ${line}`)
+    .join('\n');
+}
+
+/** True once something uncaught has been seen. */
+const threwDuringBoot = (failures: PageFailures): boolean => failures.thrown.length > 0;
+
+
+/**
  * Waits until the app has booted.
  *
  * Readiness is the product's own `boot:complete` step, published on `__P1_BOOT__`.
@@ -105,19 +184,25 @@ export const BOOT_TIMEOUT_MS = 15_000;
  * path this milestone exists to understand -- without spending the real 15s
  * budget on every such test. Production callers take the default.
  */
-export async function waitForApp(page: Page, timeoutMs: number = BOOT_TIMEOUT_MS): Promise<void> {
-  const errors: string[] = [];
-  const record = (message: string): void => {
-    errors.push(message);
-  };
-  page.on('pageerror', (error) => record(`pageerror: ${error.message}`));
-  page.on('console', (message) => {
-    if (message.type() === 'error') record(`console.error: ${message.text()}`);
-  });
-  page.on('requestfailed', (request) =>
-    record(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`),
-  );
-
+/**
+ * Waits until the app has booted.
+ *
+ * Readiness is the product's own `boot:complete` step, published on `__P1_BOOT__`.
+ * It cannot be half-true, which matters because the check it replaced could be.
+ *
+ * @param timeoutMs injectable so tests can exercise the failure path -- which is the
+ *   path this milestone exists to understand -- without spending the real 15s
+ *   budget on every such test. Production callers take the default.
+ * @param failures a collector from {@link collectPageFailures}, started **before** navigation.
+ *   Omitting it is still correct but loses the two things that make a boot failure diagnosable:
+ *   exceptions raised during boot are captured at all, and the wait ends at the throw rather
+ *   than at the timeout.
+ */
+export async function waitForApp(
+  page: Page,
+  timeoutMs: number = BOOT_TIMEOUT_MS,
+  failures: PageFailures = collectPageFailures(page),
+): Promise<void> {
   try {
     // Readiness is the **app's own** `boot:complete` step, not a conjunction of DOM side-effects.
     //
@@ -134,19 +219,28 @@ export async function waitForApp(page: Page, timeoutMs: number = BOOT_TIMEOUT_MS
     // and the readout was the HTML default. A readiness check that cannot tell "booted" from "never
     // started" is the defect that made this undiagnosable, so the predicate now waits on a signal the
     // product sets itself, at one step, which cannot be half-true.
-    await page.waitForFunction(
-      () => {
-        const surface = (window as unknown as Record<string, unknown>)['__P1_BOOT__'] as
-          | { read: () => { timeline: { step: string }[] } }
-          | undefined;
-        return (
-          surface !== undefined &&
-          surface.read().timeline.some((entry) => entry.step === 'boot:complete')
-        );
-      },
-      undefined,
-      { timeout: timeoutMs },
-    );
+    //
+    // Raced against the first uncaught exception. A boot that throws is not a boot that is slow, and
+    // reporting the second when the first is true costs fifteen seconds and sends the reader looking
+    // for a performance problem in a machine that was fine.
+    await Promise.race([
+      page.waitForFunction(
+        () => {
+          const surface = (window as unknown as Record<string, unknown>)['__P1_BOOT__'] as
+            | { read: () => { timeline: { step: string }[] } }
+            | undefined;
+          return (
+            surface !== undefined &&
+            surface.read().timeline.some((entry) => entry.step === 'boot:complete')
+          );
+        },
+        undefined,
+        { timeout: timeoutMs },
+      ),
+      failures.firstThrown.then((message) => {
+        throw new Error(message);
+      }),
+    ]);
   } catch (cause) {
     const state = await page
       .evaluate(() => {
@@ -171,23 +265,40 @@ export async function waitForApp(page: Page, timeoutMs: number = BOOT_TIMEOUT_MS
     // error-context file from the real reproduction was overwritten by later clean runs before it was
     // read. This log is append-only and survives, so the *first* failure is preserved no matter how
     // many clean runs follow.
-    const record = JSON.stringify({ when: new Date().toISOString(), state, errors });
+    const record = JSON.stringify({
+      when: new Date().toISOString(),
+      state,
+      thrown: failures.thrown,
+      logged: failures.logged,
+    });
     try {
       appendFileSync(join(process.cwd(), 'test-results', 'boot-failures.jsonl'), `${record}\n`);
     } catch {
       // Recording is best-effort and must never replace the real failure with a different one.
     }
-    // The message names which of the two states was reached, because they have different causes and a
-    // single message made them indistinguishable: a module graph that stalled before evaluating
-    // `app.ts`, and a boot that started and did not finish.
+
+    // Three distinct causes, three distinct messages. Reporting one of them for all three is what
+    // made this undiagnosable: the headline has to say which one happened, and the evidence has to be
+    // attached to the right one.
+    //
+    //  - it threw: an uncaught exception stopped boot. Fastest and the commonest for a bad fixture.
+    //  - the module graph never evaluated: `app.ts` was never reached, so this is not a document fault.
+    //  - it neither threw nor completed: a genuine hang, and the only case the old single message
+    //    actually described.
     const surfaceMissing =
       typeof state === 'object' && state !== null && state.boot === 'no boot surface';
-    throw new Error(
-      (surfaceMissing
+    const headline = threwDuringBoot(failures)
+      ? `The app threw while booting:\n    ${failures.thrown[0]}\n` +
+        `  A thrown boot is not a slow boot. If this names a document field, the fixture is missing it.\n`
+      : surfaceMissing
         ? 'The app module never evaluated: the page loaded but the module graph did not finish.\n'
-        : `The app started but did not reach boot:complete within ${timeoutMs / 1000}s.\n`) +
+        : `The app started but did not reach boot:complete within ${timeoutMs / 1000}s, and threw nothing.\n` +
+          `  A silent boot like this is a hang, not a malformed document -- look at the timeline below.\n`;
+
+    throw new Error(
+      headline +
         `  page state: ${JSON.stringify(state)}\n` +
-        `  page errors: ${errors.length === 0 ? '(none reported)' : errors.slice(0, 8).join('\n    ')}`,
+        `  page errors: ${describeFailures(failures)}`,
       { cause },
     );
   }
@@ -236,8 +347,10 @@ async function normaliseZoom(page: Page, options: MountOptions): Promise<void> {
 }
 
 export async function mountSample(page: Page, options: MountOptions = {}): Promise<void> {
+  // Before the navigation, because the app boots during it. See `collectPageFailures`.
+  const failures = collectPageFailures(page);
   await page.goto('/');
-  await waitForApp(page);
+  await waitForApp(page, BOOT_TIMEOUT_MS, failures);
   await normaliseZoom(page, options);
   await page.evaluate(() => {
     (document.querySelector('[data-zoom-readout]') as HTMLElement).style.visibility = 'hidden';
@@ -254,8 +367,11 @@ export async function mountFixture(
   options: MountOptions = {},
 ): Promise<void> {
   await page.addInitScript(`window.__P1_FIXTURE__ = (${source});`);
+  // Before the navigation: the fixture is evaluated and the document laid out during it, so a
+  // fixture missing a field throws here -- and this is the only place that can still hear it.
+  const failures = collectPageFailures(page);
   await page.goto('/');
-  await waitForApp(page);
+  await waitForApp(page, BOOT_TIMEOUT_MS, failures);
   await normaliseZoom(page, options);
   await page.evaluate(() => {
     (document.querySelector('[data-zoom-readout]') as HTMLElement).style.visibility = 'hidden';
@@ -272,8 +388,9 @@ export async function mountFixture(
  */
 export async function mountFixtureAsBooted(page: Page, source: string): Promise<void> {
   await page.addInitScript(`window.__P1_FIXTURE__ = (${source});`);
+  const failures = collectPageFailures(page);
   await page.goto('/');
-  await waitForApp(page);
+  await waitForApp(page, BOOT_TIMEOUT_MS, failures);
   await page.evaluate(() => {
     (document.querySelector('[data-zoom-readout]') as HTMLElement).style.visibility = 'hidden';
   });

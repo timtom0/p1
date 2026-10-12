@@ -251,6 +251,65 @@ test.describe('the readiness condition cannot be satisfied by static HTML', () =
     // without a rerun.
     expect(failure?.message).toContain('render:return');
   });
+
+  test('a fixture that throws while booting is named, not reported as a timeout', async ({ page }) => {
+    // The defect this milestone paid for. `mountFixture` used to attach its error listeners *inside*
+    // `waitForApp`, which runs after `page.goto('/')` -- and the app boots during `goto`. Every
+    // exception raised while booting had already fired before anything was listening.
+    //
+    // Seven page fixtures missing `Page.size` therefore failed with an identical
+    // "did not reach boot:complete within 15s" and an explicit `page errors: (none reported)`,
+    // across four unrelated specs: 83 failures whose message pointed at the machine and away from
+    // the fixture. The first reading of them was a slow box.
+    //
+    // Driven through `mountFixture` on purpose, not `waitForApp` on a prepared page: the listener
+    // timing is the bug, and only the real mount path reproduces it.
+    const failure = await mountFixture(
+      page,
+      `() => ({
+        formatVersion: 3, id: 'broken', name: 'Broken',
+        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        assets: {},
+        pages: [
+          // No size, which is what M20 made required.
+          { id: 'p1', name: '1', background: { type: 'solid', color: '#ffffff' }, objects: [] },
+        ],
+      })`,
+    ).then(
+      () => null,
+      (error: Error) => error,
+    );
+
+    expect(failure, 'a page with no size booted without complaint').not.toBeNull();
+    // The cause is named, and the headline says it threw rather than that it was slow.
+    expect(failure?.message).toContain('The app threw while booting');
+    expect(failure?.message).toContain('pageerror:');
+    // The specific thing it must NOT say: the old message, which sent the reader to the machine.
+    expect(failure?.message).not.toContain('started but did not reach');
+    // And it must not claim nothing was reported. That phrase is what made this undiagnosable.
+    expect(failure?.message).not.toContain('(none reported)');
+  });
+
+  test('a fixture that boots is not failed on a console.error alone', async ({ page }) => {
+    // The other half of the fix, and the reason `thrown` and `logged` are kept apart. The product
+    // emits `console.error` for advisory things -- `Document invariant violations` is one -- and
+    // several specs provoke them deliberately. Racing the boot signal against *any* console error
+    // would fail every test that does, which is why only an uncaught exception is fatal.
+    await mountFixture(
+      page,
+      `() => {
+        console.error('an advisory message that must not fail the boot');
+        return {
+          formatVersion: 3, id: 'noisy', name: 'Noisy',
+          pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          assets: {},
+          pages: [{ id: 'p1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [] }],
+        };
+      }`,
+    );
+    // Reaching here is the assertion: the mount resolved despite the console.error.
+    expect(stepNames(await timeline(page))).toContain('boot:complete');
+  });
 });
 
 test.describe('the surface is not part of the document', () => {
