@@ -32,9 +32,10 @@
 #
 # A mutation that no test can kill is either a coverage gap or an equivalent mutant, and the two deserve
 # opposite responses: a gap should be closed, an equivalent mutant should be recorded and never counted
-# again. One entry is currently accepted. It is listed here, with the reason, so that "1 of 112 undetected"
-# is a decision rather than an oversight -- and so that the next milestone inherits a known quantity instead
-# of rediscovering it.
+# again. One entry is currently accepted. It is listed here, with the reason, so that the single undetected
+# result in a full run is a decision rather than an oversight -- and so that the next milestone inherits a
+# known quantity instead of rediscovering it. (Deliberately not written as a fraction: a count here goes
+# stale the moment a mutant is added, and a stale count reads as a claim about the current run.)
 #
 # **1. `the dirty indicator is laid out with padding again (resizes every baseline)`** — `src/ui/styles.css`,
 #    target `tests/editor/persistence.spec.ts`.
