@@ -41,11 +41,12 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M18** Visibility semantics | **Done** — see [M18 notes](#m18-implementation-notes--visibility-semantics). `visible: false` is not a rendering detail: a node is effectively visible when it **and every ancestor** is visible. The contract already lived in the renderer and in `selection.ts`; `arrange.ts` was the outlier and now filters placements. |
 | **M19** Print profile & PDF export | **Done** — see [M19 notes](#m19-implementation-notes--print-profile-and-pdf-export) and [ADR 0018](adr/0018-print-profile-and-pdf-export.md). Export is `window.print()` against a print profile — no PDF writer and no second representation of the document. |
 | **M20** Page management | **Done - per-page dimensions, page commands, mixed-size PDF** - see [ADR 0019](adr/0019-per-page-dimensions.md) |
+| **M21** Typography foundation | **Done - the existing controls made reachable and real** - see [ADR 0003 amendments](adr/0003-production-text-model.md#amendments). `fontFamily` control added; the unset state of every `TextStyle` property made reachable; `Ctrl+B/I/U` bound outside a text session; `dir="auto"` per paragraph |
 | M20+ | Not started |
 
-Seventeen known limitations are recorded rather than hidden. Three of them are now closed and struck
-through rather than deleted — the selection outline in M11, group interaction in M13, orphaned assets in
-M14 — so a reader can see what was believed and when it stopped being true. None of the open fourteen
+Twenty known limitations are recorded rather than hidden. Three of them are now closed and struck
+through rather than deleted - the selection outline in M11, group interaction in M13, orphaned assets in
+M14 - so a reader can see what was believed and when it stopped being true. None of the open seventeen
 blocks the next milestone:
 
 - **Lost external writes.** A model write to a frame being edited is deferred and
@@ -113,6 +114,24 @@ blocks the next milestone:
   discovered. Invariance is not achievable by adjusting a number:
   `vector-effect: non-scaling-stroke` is accepted by Chromium on an HTML element and then ignored,
   because it is defined for SVG geometry (ADR 0011 §9 F7, F8; ADR 0011b §5).
+- **Paragraph direction is inferred, not authored.** M21 added `dir="auto"` to every rendered
+  paragraph, which fixes the neutrals — a trailing full stop after Arabic now lands with its
+  sentence instead of at the right edge (measured in `tests/editor/typography-bidi.spec.ts`; see
+  [ADR 0003 amendments](adr/0003-production-text-model.md#m21--dirauto-on-every-rendered-paragraph)).
+  What remains is that **there is no way for an author to state a direction**. A paragraph beginning
+  with a neutral — `. مرحبا`, `— 2026` — has no strong character for `auto` to go on and falls back to
+  the document direction, which is left-to-right; and mixed-direction publishing (an English sentence
+  inside an Arabic one, which wants the paragraph base to stay RTL) cannot be expressed at all.
+  **M22 follow-up:** an explicit per-paragraph direction, which is a `ParagraphBlock` field, a format
+  key, and a UI control together — deliberately not started here, because adding it speculatively
+  would put a field in the format that this build cannot yet use.
+- **The screen and the PDF are not compared pixel-for-pixel.** Deliberate. Chromium's print engine
+  re-shapes text, may substitute a font it cannot embed, and breaks lines differently, so an equality
+  assertion would be untrue until it failed for a reason nobody could act on. What M21 *does* assert
+  is narrower and provable: the authored families are the ones embedded (`/BaseFont` in the generated
+  bytes), typography does not change pagination, and character presence and order survive — see
+  `tests/editor/typography-print.spec.ts`. Glyph *shaping* in the PDF is a print-engine property and
+  is explicitly not claimed.
 - ~~**The selection outline does not follow rotation.**~~ **Fixed in M11.** For nine milestones the
   overlay wrote `x/y/width/height` with **no transform**, so a rotated object was framed by an
   unrotated box at its model position — a rotated ellipse painted 171.2 x 156.6 inside a frame of
