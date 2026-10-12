@@ -198,24 +198,53 @@ export default defineConfig({
       timeout: 180_000,
     },
     /*
-     * The dev server, for the spike harness alone.
+     * **A server left over from an earlier run silently wins.**
+     *
+     * `reuseExistingServer` adopts whatever is already listening, so a preview server started
+     * before this file changed keeps serving the *old* configuration. When the spike stopped
+     * being proxied to a dev transform and became a bundle under `/spike-assets/`, a stale server
+     * had no proxy rule for that path: the page loaded, its script 404'd, and 44 spike tests failed
+     * on `window.__spike` never appearing -- a failure that reads like the spike being broken and is
+     * actually the harness being stale.
+     *
+     * So if a server change and a spike-shaped failure arrive together, restart the server before
+     * investigating anything else. `P1_PREVIEW_PORT`/`P1_DEV_PORT` are the clean way to get a
+     * guaranteed-fresh pair without touching a running process.
+     */
+    /*
+     * The spike harness's own server.
      *
      * `spike.html` is excluded from the production bundle on purpose (ADR 0001:
-     * throwaway §10.3 research that must not become a second shipped entry point)
-     * and it loads `/src/spike/text-spike.ts` as a raw module, which only the dev
-     * transform can serve. `vite.config.ts` proxies those requests through the
-     * preview server, so the 44 spike tests reach this server under the same
-     * `baseURL` as everything else and needed no changes.
+     * throwaway §10.3 research that must not become a second shipped entry point),
+     * so it needs a build of its own. `vite.spike.config.ts` produces it into
+     * `dist-spike/`, a git-ignored sibling of `dist/` that the product build never
+     * reads, and serves that output statically.
      *
-     * It is a real second lifecycle and is kept deliberately: it is the only
-     * thing that can serve a dev-only entry point, and it carries 44 of 556
-     * tests -- about a twelfth of the socket pressure that caused the failure.
+     * **This used to be a dev server**, and that was the defect. A dev boot pulls
+     * the module graph over one request per module -- ~49 -- and each of those
+     * short-lived sockets lingers in `TIME_WAIT` for 240s against a 16,384-port
+     * dynamic range. Across a suite that holds one long-lived server, the pool runs
+     * dry and Chromium fails a request with `net::ERR_NO_BUFFER_SPACE` (Windows
+     * `Tcpip` event 4231). The browser then gives up on a request that never
+     * reached the server, the page never boots, and the failure reads as an
+     * application fault. It was not one -- and it landed on a spike test during M20,
+     * where it cost a diagnostic cycle before anyone established that.
+     *
+     * The product was moved off the dev server for the same reason; this is the
+     * last server doing it. Bundling removes the failure surface rather than
+     * tolerating it, and it retires the only dev-only request shapes the proxy
+     * needed to forward.
+     *
+     * Same shape as the server above -- build, then preview the output -- so a
+     * preview server can never come up against a missing or stale `dist-spike/`.
      */
     {
-      command: `npx vite --host 127.0.0.1 --port ${DEV_PORT} --strictPort`,
-      url: `http://127.0.0.1:${DEV_PORT}`,
+      command:
+        `npm run build:spike && npx vite preview --config vite.spike.config.ts ` +
+        `--host 127.0.0.1 --port ${DEV_PORT} --strictPort`,
+      url: `http://127.0.0.1:${DEV_PORT}/spike.html`,
       reuseExistingServer: !process.env['CI'],
-      timeout: 60_000,
+      timeout: 120_000,
     },
   ],
 });

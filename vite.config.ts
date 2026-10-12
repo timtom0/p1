@@ -19,7 +19,7 @@ import { defineConfig } from 'vitest/config';
  * value fails once, loudly, instead of producing `5174NaN` and a confusing port
  * error much later.
  */
-function port(name: string, fallback: number): number {
+export function port(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
   const value = Number.parseInt(raw, 10);
@@ -35,32 +35,39 @@ const DEV_PORT = port('P1_DEV_PORT', 5175);
 export default defineConfig({
   server: { port: 5173 },
   /*
-   * `preview` proxies the spike harness back to the dev server.
+   * `preview` proxies the spike harness to its own static server.
    *
    * The browser suite is served the production bundle for `/` (see
    * `playwright.config.ts` for why: the unbundled dev module graph exhausts the
-   * OS ephemeral port pool over a long run). But `spike.html` is deliberately
+   * OS ephemeral port pool over a long run). `spike.html` is deliberately
    * excluded from that bundle -- it is throwaway §10.3 research, recorded in
-   * ADR 0001, and building it would make it an unowned second entry point in
-   * the shipped output.
+   * ADR 0001, and building it there would make it an unowned second entry point
+   * in the shipped output.
    *
-   * `spike.html` loads `/src/spike/text-spike.ts` as a raw module, which only
-   * the dev transform can serve. So it, and the dev-only request shapes it needs,
-   * are proxied here. This keeps a single origin for every test: `baseURL` does
-   * not change per spec, and the spike specs keep working unmodified.
+   * It used to be served by a **dev** server and proxied here, because a raw
+   * `/src/spike/text-spike.ts` import can only be served by the dev transform.
+   * That is what exhausted the port pool: ~49 module requests per boot, each
+   * lingering in TIME_WAIT for 240s, against a suite holding one long-lived
+   * server. `vite.spike.config.ts` now bundles it into its own `dist-spike/`, so
+   * the spike boots as one bundled request exactly like the product, and this
+   * proxy points at a static server rather than a transform.
+   *
+   * The path list shrank with it. `/src`, `/@vite` and `/node_modules` were
+   * dev-only request shapes; a bundle asks for none of them, so they are gone rather
+   * than left to match. Every path here is enumerated on purpose: a wildcard would
+   * silently start serving the product from the spike's output the first time the
+   * spike page referenced something unexpected.
    *
    * Deliberately NOT proxied: `/` and `/assets/`. Those must come from `dist/`,
-   * which is the entire point -- if `/` ever fell through to the dev server the
-   * suite would silently be testing the thing it was moved away from.
+   * which is the entire point -- if `/` ever fell through to the spike server the
+   * suite would silently be testing a different application than it ships.
    */
   preview: {
     port: PREVIEW_PORT,
     strictPort: true,
     proxy: {
       '/spike.html': `http://127.0.0.1:${DEV_PORT}`,
-      '/src': `http://127.0.0.1:${DEV_PORT}`,
-      '/@vite': `http://127.0.0.1:${DEV_PORT}`,
-      '/node_modules': `http://127.0.0.1:${DEV_PORT}`,
+      '/spike-assets/': `http://127.0.0.1:${DEV_PORT}`,
     },
   },
   build: {
