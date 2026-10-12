@@ -680,7 +680,7 @@ export function mountInspector(
     ['bold', 'B', 'Bold (Ctrl+B)'],
     ['italic', 'I', 'Italic (Ctrl+I)'],
     ['underline', 'U', 'Underline (Ctrl+U)'],
-    ['strike', 'S', 'Strikethrough'],
+    ['strike', 'S', 'Strikethrough (Ctrl+Shift+X)'],
   ] as const) {
     const button = document.createElement('button');
     button.type = 'button';

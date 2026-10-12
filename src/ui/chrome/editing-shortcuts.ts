@@ -19,6 +19,37 @@
 
 import type { Editor } from '../../editor/editor';
 import type { ShapeKind } from '../../model/types';
+import type { CharFlag } from '../../model/rich-text';
+
+/**
+ * The character-formatting flag a keystroke means, or `null` for a key that means none.
+ *
+ * `event.key`, not `event.code`, for the reason `shortcuts.ts` gives: these are characters and
+ * `code` would put them on the wrong physical keys outside a US layout.
+ *
+ * Alt is refused everywhere. Alt+B/I/U/X are browser and OS chords -- bookmarks, Firefox's reader
+ * mode -- and an editor that swallows them breaks the user without adding anything.
+ *
+ * **Ctrl+X is not strikethrough; Ctrl+Shift+X is.** Plain Ctrl+X is cut, which every editor
+ * provides and this one does not, so binding it would take away an operation to add a cosmetic one.
+ * Chromium uses Ctrl+Shift+X for strikethrough, so the modifier matches the platform convention
+ * rather than inventing one.
+ */
+function characterFormatFlag(event: KeyboardEvent): CharFlag | null {
+  if (event.altKey) return null;
+  switch (event.key.toLowerCase()) {
+    case 'b':
+      return 'bold';
+    case 'i':
+      return 'italic';
+    case 'u':
+      return 'underline';
+    case 'x':
+      return event.shiftKey ? 'strike' : null;
+    default:
+      return null;
+  }
+}
 
 export interface EditingShortcutOptions {
   editor: Editor;
@@ -51,9 +82,40 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
       return;
     }
 
-    if (isTypingTarget(event.target)) return;
 
     const command = event.ctrlKey || event.metaKey;
+    // ---- character formatting ----------------------------------------------
+    //
+    // Checked *before* the typing-target guard below, because the two cases want opposite
+    // treatment and lumping them together is a real bug rather than a tidiness question.
+    //
+    // Inside a text session this is unreachable: the early return above has already handed the
+    // keyboard back, and Ctrl+B/I/U reach the browser, which applies them to the live selection with
+    // `execCommand`. So there is exactly one implementation of "bold the selection" and it is not
+    // this one.
+    //
+    // Everywhere else the browser's own chord is worse than nothing: Ctrl+U opens view-source and
+    // Ctrl+B opens the bookmarks sidebar. That is true even inside an inspector field, where this
+    // must not *apply* anything -- pressing Ctrl+B while typing a colour should not bold a text
+    // frame, and it should equally not navigate the user out of the document. So the default is
+    // suppressed unconditionally, and the toggle only runs when the keystroke was not aimed at a
+    // form control.
+    //
+    // Routed through `TextSessionController.applyInlineFormat` rather than a direct `setText`,
+    // because that method already encodes the session-versus-model distinction this milestone says
+    // to preserve, and it is the same call the inspector's B/I/U/S buttons make. A shortcut doing
+    // its own thing would be a second implementation to keep in step with the buttons.
+    const flag = characterFormatFlag(event);
+    if (command && flag !== null) {
+      event.preventDefault();
+      if (isTypingTarget(event.target)) return;
+      const frameId = editor.selectionState.primary;
+      if (frameId !== null) editor.textSession?.applyInlineFormat(flag, frameId);
+      return;
+    }
+
+    if (isTypingTarget(event.target)) return;
+
 
     // ---- history ----------------------------------------------------------
     if (command && event.key.toLowerCase() === 'z') {
@@ -75,6 +137,8 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
       return;
     }
 
+    // ---- character formatting ----------------------------------------------
+    //
     if (event.key === 'Escape') {
       if (editor.isGesturing) {
         event.preventDefault();
