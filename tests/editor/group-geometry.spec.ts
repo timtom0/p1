@@ -99,7 +99,7 @@ async function objectRect(page: Page, oid: string): Promise<Rect> {
  * ## The unit matters, and this file got it wrong first
  *
  * The result is page-local, not client, because element.style.left/	op are page-local and the computed
- * 	ransform carries no translation. Comparing one of these against a oundingBox() -- which is
+ * 	ransform carries no translation. Comparing one of these against a boundingBox() -- which is
  * **client** -- produced a 469px error on the first run and looked like a geometry bug. It is the same
  * trap M11 recorded as "page px and client px are not interchangeable" (tests/visual/README.md trap 41),
  * reached from the other direction: there, a client value was passed to a page API.

@@ -101,7 +101,7 @@ describe('undo restores the dropped bytes', () => {
     // of history, so undo has to restore a deleted image *and* its bytes. One command means one step.
     const start = document();
     // History.dispatch is the path DocStore uses, and it is the one that decides whether an entry
-    // is recorded -- so the test drives it rather than calling pply and pushing by hand, or it
+    // is recorded -- so the test drives it rather than calling Apply and pushing by hand, or it
     // would be testing its own arrangement instead of the product's.
     const history = new History();
     const { doc: pruned, changed } = history.dispatch(start, { type: 'pruneAssets' });

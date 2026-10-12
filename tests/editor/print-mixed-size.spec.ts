@@ -87,9 +87,8 @@ async function mountMixed(page: Page, sizes: readonly PageSize[]): Promise<void>
     formatVersion: 3,
     id: 'doc_mixed',
     name: 'Mixed',
-    // One line, deliberately: ixture-guards.test.ts finds document literals by this field and
-    // then checks that ssets sits on the next line or two. A pretty multi-line block here would fail
-    // that guard for a formatting reason.
+    // fixture-guards.test.ts finds document literals by this field and checks the rest of
+    // the literal forwards from it, so the assets key above is what it looks for.
     pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     assets: {},
     pages: ${JSON.stringify(sizes)}.map((size, index) => ({

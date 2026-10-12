@@ -229,7 +229,7 @@ test.describe('F6: the selection frame is the transformed frame', () => {
     await select(page, { x: 640, y: 560 });
     const { object, frame, handles, grip } = await probe(page, 'l-zero');
     // The *layout* box is zero. The painted band is 2px, because .p1-overlay-box is
-    // ox-sizing: border-box with a 1px border, so a collapsed box still shows a 1px line above and
+    // box-sizing: border-box with a 1px border, so a collapsed box still shows a 1px line above and
     // below its own edge -- which is what makes a horizontal line findable at all.
     const layoutHeight = await page
       .locator('.p1-overlay-group--selection .p1-overlay-box')

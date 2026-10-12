@@ -1142,7 +1142,7 @@ export class Editor {
       case 'marquee': {
         const rect = normaliseRect(this.gesture.origin, pagePoint);
         this.marquee = { pageId: this.gesture.pageId, rect };
-        // A press that never becomes a drag must not marquee-select. See pplyMarquee.
+        // A press that never becomes a drag must not marquee-select. See ApplyMarquee.
         if (rect.width > 0 || rect.height > 0) this.moved = true;
         this.redrawOverlay();
         break;
