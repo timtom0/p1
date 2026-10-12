@@ -57,6 +57,7 @@ function stackFixture(count: number): string {
     { length: count },
     (_unused, index) => `{
       id: 'pg_${index + 1}', name: '${index + 1}',
+    size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       background: { type: 'solid', color: '#ffffff' }, objects: [],
     }`,
   ).join(',');
@@ -698,7 +699,7 @@ test('two-page stack renders both pages', async ({ page }) => {
         pages: [
           { id: 'pg_1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' },
             objects: [make(1, '#ff0000')] },
-          { id: 'pg_2', name: '2', background: { type: 'solid', color: '#f4f4f5' },
+          { id: 'pg_2', name: '2', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#f4f4f5' },
             objects: [make(2, '#0000ff')] },
         ],
       };

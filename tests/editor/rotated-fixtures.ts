@@ -105,6 +105,7 @@ export const ROTATED_KINDS = `() => {
       },
       {
         id: 'p2', name: '2',
+    size: { width: 900, height: 700, unit: 'pt', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           base('r-rot-p2', 'shape', {

@@ -77,11 +77,13 @@ export const PRINT_THREE_PAGES = `() => ({
     },
     {
       id: 'p2', name: 'Two',
+      size: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' },
       background: { type: 'solid', color: '#102030' },
       objects: [],
     },
     {
       id: 'p3', name: 'Three',
+      size: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' },
       background: { type: 'solid', color: '#f0f0f0' },
       objects: [
         { type: 'shape', id: 'turned', name: 'turned',

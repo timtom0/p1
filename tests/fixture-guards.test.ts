@@ -44,12 +44,22 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Every file that could hold an injected document source. */
-const SOURCES = walk(TESTS_ROOT).filter((file) => !file.endsWith('.test.ts'));
+/**
+ * Every file that could hold an injected document source.
+ *
+ * `page-size-migration.test.ts` is excluded: its documents are deliberately format version 2,
+ * with a document-wide `pageSize` and no per-page `size`, because the migration from one to
+ * the other is what it exists to prove.
+ */
+const SOURCES = walk(TESTS_ROOT).filter(
+  (file) => !file.endsWith('.test.ts') && !file.endsWith('page-size-migration.test.ts'),
+);
 
 interface DocumentLiteral {
   file: string;
   line: number;
+  /** Character offset just past this literal's `pageSetup: {`, for slicing the source. */
+  after: number;
   /** The first line of the literal. */
   text: string;
 }
@@ -60,15 +70,26 @@ interface DocumentLiteral {
  * Keyed on `pageSetup` rather than `formatVersion` because `pageSetup` is the one field every
  * fixture must have for the renderer to lay the page out at all, so it cannot miss a literal
  * that exists.
+ *
+ * Positions are kept as character offsets as well as line numbers, because the checks below
+ * slice the source. Using the line number as if it were an offset silently searches the wrong
+ * part of the file and finds nothing.
  */
 function findDocumentLiterals(): DocumentLiteral[] {
   const found: DocumentLiteral[] = [];
   for (const file of SOURCES) {
-    const lines = readFileSync(file, 'utf8').split('\n');
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? '';
-      if (!/^\s*pageSetup:\s*\{/.test(line)) continue;
-      found.push({ file, line: index + 1, text: line.trim() });
+    const source = readFileSync(file, 'utf8');
+    const pattern = /^[ \t]*pageSetup:[ \t]*\{/gm;
+    for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
+      const line = source.slice(0, match.index).split('\n').length;
+      found.push({
+        file,
+        line,
+        // Past the whole match, so a search for the *next* literal cannot land back on this
+        // one -- the match begins at the indentation, before the key it is searching for.
+        after: match.index + match[0].length,
+        text: source.slice(match.index).split('\n')[0]?.trim() ?? '',
+      });
     }
   }
   return found;
@@ -86,25 +107,58 @@ describe('injected document fixtures', () => {
   it('every document literal declares `assets`', () => {
     const missing: string[] = [];
     for (const literal of literals) {
-      const lines = readFileSync(literal.file, 'utf8').split('\n');
-      // The window is the pageSetup line plus the two after it: `assets` sits on the next
-      // line in every existing fixture, but a window keeps a differently-formatted fixture
-      // from tripping this.
-      const window = lines.slice(literal.line - 1, literal.line + 2).join('\n');
-      if (!window.includes('assets')) {
+      const source = readFileSync(literal.file, 'utf8');
+      // Forward from this literal's own `pageSetup`, never backward. A fixed line count is a
+      // guess about formatting: one that was three lines long passed until a fixture wrote
+      // `pageSetup` as a five-line block, and it silently stopped checking anything. The run
+      // ends at the next literal in the file, so this cannot reach into a neighbouring
+      // document and find an `assets` that is not this one's.
+      const next = source.indexOf('pageSetup:', literal.after);
+      const end = next === -1 ? source.length : next;
+      if (!source.slice(literal.after, end).includes('assets')) {
         missing.push(`${literal.file}:${literal.line}`);
       }
     }
     expect(
       missing,
       'these document literals omit `assets`, so the app receives a document that is not a ' +
-        '`Document`. Add `assets: {}` (or the records the fixture needs) on or after the ' +
+        '`Document`. Add `assets: {}` (or the records the fixture needs) after the ' +
         '`pageSetup` line.',
     ).toEqual([]);
   });
 
-  it('parses every injected fixture source', () => {
-    // The pre-existing rule, kept here so all the fixture guards live in one place: an
+  it('every page literal declares its own `size`', () => {
+    // The M20 hole. `Page.size` is required, so a page without one throws during the first
+    // render and the app never reaches `boot:complete` -- which the harness reports as a
+    // 15-second timeout, in a different spec, for what is a missing key in a string.
+    //
+    // The window is anchored at the page's *own* opening brace and stops at its `background`,
+    // never a fixed number of lines back. A line-based lookback reads the previous page's
+    // `size` and passes a literal that has none, which is exactly how seven of these got
+    // missed the first time: page 2 on one line, page 1 above it, both with `background`.
+    const missing: string[] = [];
+    for (const file of SOURCES) {
+      const source = readFileSync(file, 'utf8');
+      // Only the opening of an *object*, so a node (`{ type: 'shape', id: ...`) cannot match.
+      const opening = /\{\s*id:\s*'[^']*'\s*,\s*name:\s*'[^']*'/g;
+      for (let match = opening.exec(source); match !== null; match = opening.exec(source)) {
+        const background = source.indexOf('background:', match.index);
+        // A page with no `background` at all is a different fault; leave it to the boot guard.
+        if (background === -1) continue;
+        if (!/\bsize[:,]/.test(source.slice(match.index, background))) {
+          const line = source.slice(0, match.index).split('\n').length;
+          missing.push(`${file}:${line}`);
+        }
+      }
+    }
+    expect(
+      missing,
+      'these page literals omit `size`, so the app is handed a page it cannot lay out and ' +
+        'never finishes booting. Add `size: { ... }` to each one.',
+    ).toEqual([]);
+  });
+
+  it('parses every injected fixture source', () => {    // The pre-existing rule, kept here so all the fixture guards live in one place: an
     // injected source with a stray bracket falls back to the sample document silently, and
     // every assertion after it reports a missing element.
     const files = SOURCES.filter((file) => readFileSync(file, 'utf8').includes('() => ({'));

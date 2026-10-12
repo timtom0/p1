@@ -153,6 +153,7 @@ export const GROUPS = `() => {
       },
       {
         id: 'p2', name: '2',
+    size: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' },
         background: { type: 'solid', color: '#ffffff' },
         objects: [
           group('p2-group', [
