@@ -30,7 +30,7 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { extname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const TESTS_ROOT = join(process.cwd(), 'tests');
@@ -47,13 +47,34 @@ function walk(dir: string, out: string[] = []): string[] {
 /**
  * Every file that could hold an injected document source.
  *
- * `page-size-migration.test.ts` is excluded: its documents are deliberately format version 2,
- * with a document-wide `pageSize` and no per-page `size`, because the migration from one to
- * the other is what it exists to prove.
+ * `page-size-migration.test.ts` is excluded wholesale: its documents are deliberately format
+ * version 2, with a document-wide `pageSize` and no per-page `size`, because the migration from
+ * one to the other is what it exists to prove.
  */
 const SOURCES = walk(TESTS_ROOT).filter(
   (file) => !file.endsWith('.test.ts') && !file.endsWith('page-size-migration.test.ts'),
 );
+
+/** `tests/…` with forward slashes, so a key below cannot depend on the platform separator. */
+function testRelativePath(file: string): string {
+  return relative(TESTS_ROOT, file).split(sep).join('/');
+}
+
+/**
+ * Files allowed to contain a page with no `size`, and the reason each one is.
+ *
+ * Not a blanket exclusion: `boot-diagnostics.spec.ts` mounts a *deliberately* malformed fixture
+ * to prove the harness names a thrown boot instead of reporting a timeout, and the rest of that
+ * file is held to the same rule as everywhere else.
+ *
+ * Each exemption is checked below to still have the literal it exists for, so it cannot outlive
+ * its reason -- the same discipline the mutation corpus applies to its accepted survivors. Fix
+ * the malformed fixture and this fails, telling you to delete the entry.
+ */
+const DELIBERATELY_UNSIZED: Record<string, string> = {
+  'editor/boot-diagnostics.spec.ts':
+    'mounts a page with no size on purpose, to prove a thrown boot is named rather than reported as a timeout',
+};
 
 interface DocumentLiteral {
   file: string;
@@ -95,6 +116,30 @@ function findDocumentLiterals(): DocumentLiteral[] {
   return found;
 }
 
+/**
+ * Every page literal in `file` that carries no `size`, as `path:line`.
+ *
+ * The window is anchored at the page's *own* opening brace and stops at its `background`, never a
+ * fixed number of lines back. A line-based lookback reads the *previous* page's `size` and passes
+ * a literal that has none, which is exactly how seven of these got missed the first time: page 2
+ * written on one line under page 1, both mentioning `background`.
+ */
+function findUnsizedPages(file: string): string[] {
+  const source = readFileSync(file, 'utf8');
+  const found: string[] = [];
+  // Only the opening of an *object*, so a node (`{ type: 'shape', id: …`) cannot match.
+  const opening = /\{\s*id:\s*'[^']*'\s*,\s*name:\s*'[^']*'/g;
+  for (let match = opening.exec(source); match !== null; match = opening.exec(source)) {
+    const background = source.indexOf('background:', match.index);
+    // A page with no `background` at all is a different fault; leave it to the boot guard.
+    if (background === -1) continue;
+    if (!/\bsize[:,]/.test(source.slice(match.index, background))) {
+      found.push(`${testRelativePath(file)}:${source.slice(0, match.index).split('\n').length}`);
+    }
+  }
+  return found;
+}
+
 describe('injected document fixtures', () => {
   const literals = findDocumentLiterals();
 
@@ -129,27 +174,12 @@ describe('injected document fixtures', () => {
 
   it('every page literal declares its own `size`', () => {
     // The M20 hole. `Page.size` is required, so a page without one throws during the first
-    // render and the app never reaches `boot:complete` -- which the harness reports as a
-    // 15-second timeout, in a different spec, for what is a missing key in a string.
-    //
-    // The window is anchored at the page's *own* opening brace and stops at its `background`,
-    // never a fixed number of lines back. A line-based lookback reads the previous page's
-    // `size` and passes a literal that has none, which is exactly how seven of these got
-    // missed the first time: page 2 on one line, page 1 above it, both with `background`.
+    // render and the app never reaches `boot:complete` -- which is what made seven of these
+    // surface as 83 identical timeouts across four unrelated specs.
     const missing: string[] = [];
     for (const file of SOURCES) {
-      const source = readFileSync(file, 'utf8');
-      // Only the opening of an *object*, so a node (`{ type: 'shape', id: ...`) cannot match.
-      const opening = /\{\s*id:\s*'[^']*'\s*,\s*name:\s*'[^']*'/g;
-      for (let match = opening.exec(source); match !== null; match = opening.exec(source)) {
-        const background = source.indexOf('background:', match.index);
-        // A page with no `background` at all is a different fault; leave it to the boot guard.
-        if (background === -1) continue;
-        if (!/\bsize[:,]/.test(source.slice(match.index, background))) {
-          const line = source.slice(0, match.index).split('\n').length;
-          missing.push(`${file}:${line}`);
-        }
-      }
+      if (DELIBERATELY_UNSIZED[testRelativePath(file)] !== undefined) continue;
+      missing.push(...findUnsizedPages(file));
     }
     expect(
       missing,
@@ -158,7 +188,23 @@ describe('injected document fixtures', () => {
     ).toEqual([]);
   });
 
-  it('parses every injected fixture source', () => {    // The pre-existing rule, kept here so all the fixture guards live in one place: an
+  it('every deliberate exemption is still needed', () => {
+    // An exemption that outlives its reason is a hole with a comment on it. If the malformed
+    // fixture is ever repaired, this fails and the entry has to go with it.
+    const stale = Object.keys(DELIBERATELY_UNSIZED).filter((key) => {
+      const file = SOURCES.find((candidate) => testRelativePath(candidate) === key);
+      return file === undefined || findUnsizedPages(file).length === 0;
+    });
+    expect(
+      stale,
+      'these files are exempt from the page-`size` rule but no longer contain a page without ' +
+        'one, so the exemption is dead weight. Delete the entry, and the file goes back under ' +
+        'the rule like any other.',
+    ).toEqual([]);
+  });
+
+  it('parses every injected fixture source', () => {
+    // The pre-existing rule, kept here so all the fixture guards live in one place: an
     // injected source with a stray bracket falls back to the sample document silently, and
     // every assertion after it reports a missing element.
     const files = SOURCES.filter((file) => readFileSync(file, 'utf8').includes('() => ({'));
