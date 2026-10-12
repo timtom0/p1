@@ -499,17 +499,17 @@ toolbar item yet. It is reachable only as the editor action *"Clean up unused im
 ## Verifying it
 
 ```bash
-npm test                            # 911 unit tests
-npm run test:visual                 # 635 browser tests, 25 visual baselines
-.\scripts\mutation-check.ps1        # 112 deliberate breakages, each asserted to fail a suite
+npm test                            # 1005 unit tests
+npm run test:visual                 # 658 browser tests, 25 visual baselines
+.\scripts\mutation-check.ps1        # 122 deliberate breakages, each asserted to fail a suite
 ```
 
 That last one is unusual and worth explaining. A green suite says nothing on its own unless
-a test *would* have failed, so `mutation-check.ps1` breaks 112 behaviours one at a time — dirty
+a test *would* have failed, so `mutation-check.ps1` breaks 122 behaviours one at a time — dirty
 state, the save baseline, the text fence at save time, asset ordering, version refusals, id
 reservation, the layer-order no-op rule, page-to-local conversion, snapping's threshold and
 tie-break, visibility in arrangement bounds, the tool shortcuts, the print profile — and asserts the relevant suite turns
-red. **111 are detected.** It found real gaps in tests that were otherwise passing, including one
+red. **121 are detected**, the twenty-second being the one documented survivor. It found real gaps in tests that were otherwise passing, including one
 dirty-state test that passed *without the save having happened*.
 
 It also carries a **documented list of what it cannot cover**, and that list is the point.
@@ -627,7 +627,7 @@ Vite cache (workers reach the repository's cache through the `node_modules` junc
 still). It stays behind `-Workers` because it is correct and would pay with cores to spare.
 
 That also settles the obvious scheduling idea, cheap-and-high-yield-first. It is sound in general and it
-does not apply here: **a mutation check has no early exit**, so all 112 verdicts are required whatever the
+does not apply here: **a mutation check has no early exit**, so all 122 verdicts are required whatever the
 order. Ordering only pays by feeding a parallel scheduler, and the scheduler has nothing to give.
 
 Of the ~7 minutes, roughly 3.5 is now structural per-mutant overhead on the browser half — a ~2.2s build

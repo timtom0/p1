@@ -1683,7 +1683,7 @@ not defensive padding; they are what makes the assertion after them mean anythin
 
 **A fourth rule, learned in M7: a mutation is the only proof that a test can fail.**
 The M6 suite had no negative controls — nothing verified that breaking a behaviour would fail
-the test claiming it. `scripts/mutation-check.ps1` now breaks 112 behaviours one at a time,
+the test claiming it. `scripts/mutation-check.ps1` now breaks 122 behaviours one at a time,
 asserts the relevant suite goes red, and restores the file; a mutation that no test notices is
 reported as a failure. Three gaps it found, all of which were green:
 
@@ -1698,9 +1698,9 @@ reported as a failure. Three gaps it found, all of which were green:
   file kind.
 
 Run it with `& scripts\mutation-check.ps1`. It is slow — each mutation runs a suite, and a full
-112-mutant run is roughly 16–25 minutes on the machine this was developed on — and it is
-worth it: it is the only thing in the repository that can tell you a green suite means
-something.
+ 122-mutant run measured 12 minutes warm and 28 minutes cold on the machine this was developed on
+ - and it is worth it: it is the only thing in the repository that can tell you a green suite means
+ something.
 
 ### 8.3 Fixture guards
 
@@ -3361,7 +3361,7 @@ reference for the format.
   `scripts/make-golden-assets.mjs` regenerates the inline PNGs; they are generated rather
   than hand-written for the reason M6 established.
 - **`scripts/mutation-check.ps1`** — twenty mutations as of M7, each asserted to turn a suite red.
-  The corpus has since grown to 112 and the harness has been reworked twice (§8.2); the corpus itself
+  The corpus has since grown to 122 and the harness has been reworked twice (§8.2); the corpus itself
   lives in `scripts/mutations.ps1`.
 
 ### Architectural changes
