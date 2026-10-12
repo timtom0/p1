@@ -21,7 +21,7 @@
 
 import type { Page } from '@playwright/test';
 
-import { expect, settle, test } from './helpers';
+import { confirmSetup, expect, openSetup, settle, test } from './helpers';
 
 /** The page rows currently listed, as their rendered size labels. */
 async function pageLabels(page: Page): Promise<string[]> {
@@ -35,19 +35,6 @@ async function pageCount(page: Page): Promise<number> {
 /** The status bar's page-stack readout, which is where a mixed document has to admit itself. */
 async function stackStat(page: Page): Promise<string> {
   return ((await page.locator('[data-stat="stack"]').textContent()) ?? '').trim();
-}
-
-/** Opens the New-document dialog and returns once it is modal. */
-async function openSetup(page: Page): Promise<void> {
-  await page.click('[data-doc="new"]');
-  await page.waitForSelector('[data-document-setup][open]');
-}
-
-/** Creates a document from the dialog with whatever it currently shows. */
-async function confirmSetup(page: Page): Promise<void> {
-  await page.click('[data-setup-create]');
-  await page.waitForSelector('[data-document-setup]', { state: 'hidden' });
-  await settle(page);
 }
 
 test.describe('the pages panel', () => {

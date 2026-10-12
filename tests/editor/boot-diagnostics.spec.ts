@@ -18,6 +18,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { CURRENT_FORMAT_VERSION } from '../../src/persist/format';
 import { expect, test } from './helpers';
 import { mountFixture, mountSample, waitForApp } from '../visual/harness';
 import type { Page } from '@playwright/test';
@@ -279,8 +280,8 @@ test.describe('the surface is not part of the document', () => {
     for (const needle of ['__P1_BOOT__', 'render:enter', 'pageCount', 'boot:complete', 'timeline']) {
       expect(bytes, `the saved document contains "${needle}"`).not.toContain(needle);
     }
-    // And the format is untouched: still version 2, with no new top-level key.
+    // And the format is untouched: the build's current version, with no new top-level key.
     const parsed = JSON.parse(bytes) as { formatVersion: number };
-    expect(parsed.formatVersion).toBe(2);
+    expect(parsed.formatVersion).toBe(CURRENT_FORMAT_VERSION);
   });
 });

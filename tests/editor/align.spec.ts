@@ -26,10 +26,13 @@
 import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 
+import { CURRENT_FORMAT_VERSION } from '../../src/persist/format';
 import {
   clickAt,
+  confirmSetup,
   dragWithoutSnapping,
   expect,
+  openSetup,
   selectionIds,
   settle,
   test,
@@ -599,8 +602,12 @@ test.describe('persistence', () => {
       pages: Array<{ objects: Array<{ id: string; transform: Record<string, number> }> }>;
     };
 
-    // No format bump: alignment changes existing transforms and nothing else.
-    expect(parsed.formatVersion, 'alignment must not require a format version bump').toBe(2);
+    // No format bump: alignment changes existing transforms and nothing else. Asserted
+    // against the version the build actually writes, so a future format bump does not
+    // have to edit this line — what it must never do is let alignment cause one.
+    expect(parsed.formatVersion, 'alignment must not require a format version bump').toBe(
+      CURRENT_FORMAT_VERSION,
+    );
 
     const objects = parsed.pages[0]?.objects ?? [];
     const byId = new Map(objects.map((node) => [node.id, node.transform]));
@@ -640,9 +647,10 @@ test.describe('persistence', () => {
     const aligned = await painted(page);
     const saved = await savedBytes(page);
 
-    // Reopen the same bytes through the app's own open path.
-    await page.locator('[data-doc="new"]').click();
-    await settle(page);
+    // Reopen the same bytes through the app's own open path. New ends in the setup
+    // dialog, so the fixture has to be dismissed the way a user would dismiss it.
+    await openSetup(page);
+    await confirmSetup(page);
     const emptied = await painted(page);
     expect(Object.keys(emptied).length, 'a new document has no leaves from the fixture').toBe(0);
 

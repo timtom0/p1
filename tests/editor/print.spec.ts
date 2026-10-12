@@ -38,10 +38,14 @@ interface PrintView {
 
 async function readPrintView(page: Page): Promise<PrintView> {
   return page.evaluate(() => {
+    // `checkVisibility()` rather than the element's own computed `display`, because the print
+    // stylesheet retires the whole side column with one rule on `.app__side`. A child's own
+    // computed `display` still reads as a normal value while the element renders nothing, so
+    // asking the element alone would call visible chrome hidden and let it print.
     const visible = (selector: string): boolean => {
       const element = document.querySelector(selector);
       if (element === null) return false;
-      return getComputedStyle(element).display !== 'none';
+      return element.checkVisibility();
     };
     const pageBoxes = [...document.querySelectorAll<HTMLElement>('.page')];
     const pageOrigin = pageBoxes[0]?.getBoundingClientRect();
@@ -65,6 +69,7 @@ async function readPrintView(page: Page): Promise<PrintView> {
         ruler: visible('.ruler'),
         rulerCorner: visible('.ruler-corner'),
         inspector: visible('.inspector'),
+        pagesPanel: visible('.pages-panel'),
         status: visible('.status'),
         overlay: visible('.overlay'),
       },
@@ -234,17 +239,35 @@ test.describe('print hides the editor', () => {
 // Sheet geometry
 // ---------------------------------------------------------------------------
 
+/**
+ * The profile CSS a document with these sheet sizes must produce.
+ *
+ * Written out rather than imported from `print-profile.ts` on purpose: this is the test's
+ * own statement of the rule -- one named `@page` per page, in page order, then the bare
+ * `@page` fallback carrying the first page's size. If the module and the test are changed
+ * together from one side only, one of them is wrong and this is how it shows.
+ */
+function expectedProfile(sizes: readonly string[]): string {
+  return [
+    ...sizes.map((size, index) => `@page p${index} { size: ${size}; margin: 0; }`),
+    `@page { size: ${sizes[0]}; margin: 0; }`,
+  ].join('\n');
+}
+
 test.describe('the sheet is the document page', () => {
-  test('the injected @page rule matches the document size, unit and orientation', async ({ page }) => {
+  test('the injected @page rules match each page size, unit and orientation', async ({ page }) => {
     await mountPrintThreePages(page);
     await settle(page);
-    // 120x80mm portrait.
-    expect(await readPrintView(page).then((v) => v.profileCss)).toBe('@page { size: 120mm 80mm; margin: 0; }');
+    // One named rule per page -- the document may mix sizes, so a single `@page` cannot
+    // describe it -- then the bare fallback. 120x80mm portrait, three times over.
+    expect(await readPrintView(page).then((v) => v.profileCss)).toBe(
+      expectedProfile(['120mm 80mm', '120mm 80mm', '120mm 80mm']),
+    );
 
     await mountPrintLandscapeInches(page);
     await settle(page);
     // 8.5x11in *landscape* -- the swap is the point of using a second fixture here.
-    expect(await readPrintView(page).then((v) => v.profileCss)).toBe('@page { size: 11in 8.5in; margin: 0; }');
+    expect(await readPrintView(page).then((v) => v.profileCss)).toBe(expectedProfile(['11in 8.5in']));
   });
 
   test('the profile follows a different document rather than going stale', async ({ page }) => {
@@ -286,7 +309,7 @@ test.describe('the sheet is the document page', () => {
     expect(
       await readPrintView(page).then((v) => v.profileCss),
       'the sheet tracked the newly opened document',
-    ).toBe('@page { size: 5in 7in; margin: 0; }');
+    ).toBe(expectedProfile(['5in 7in']));
   });
 
   test('generated PDF: one sheet per document page, at the authored size', async ({ page }) => {

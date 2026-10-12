@@ -37,8 +37,10 @@
 import { readFile } from 'node:fs/promises';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import {
+  confirmSetup,
   expect,
   frameText,
+  openSetup,
   settle,
   test,
   waitForAnyAssetLoaded,
@@ -231,10 +233,10 @@ test.describe('save and reopen', () => {
     const page = await first.newPage();
     await mountSample(page);
     // `New` asks before discarding, and there is nothing to discard yet, so it proceeds
-    // without a dialog. If that ever stops being true the test fails here, which is where
-    // the surprise belongs.
-    await page.locator('[data-doc="new"]').click();
-    await settle(page);
+    // without *that* dialog -- but it then opens the setup dialog, because page size is
+    // now an authored choice. Confirm it with whatever it is pre-filled with.
+    await openSetup(page);
+    await confirmSetup(page);
     expect(await objectCount(page)).toBe(0);
 
     const empty = await saveDocument(page);
@@ -267,12 +269,12 @@ test.describe('save and reopen', () => {
             visible: true, locked: false, opacity: 1, blendMode: 'normal',
             shape: { kind: 'rect', cornerRadius: 3 }, fill: { type: 'solid', color: '#ff0000' } },
         ] },
-        { id: 'p2', name: 'Two', background: { type: 'solid', color: '#eeeeee' }, objects: [
+        { id: 'p2', name: 'Two', size: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#eeeeee' }, objects: [
           { type: 'shape', id: 'n2', name: 'E', transform: { x: 10, y: 10, width: 30, height: 30, rotation: 0, scaleX: 1, scaleY: 1 },
             visible: true, locked: false, opacity: 1, blendMode: 'normal',
             shape: { kind: 'ellipse' }, fill: { type: 'solid', color: '#00ff00' } },
         ] },
-        { id: 'p3', name: 'Three', background: { type: 'solid', color: '#ffffff' }, objects: [] },
+        { id: 'p3', name: 'Three', size: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [] },
       ],
     })`;
 
@@ -565,7 +567,11 @@ test.describe('refused documents', () => {
       formatVersion: 3,
       id: 'doc_1',
       name: 'Base',
-      pageSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+      pageSetup: {
+        fixedSize: true,
+        defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+        resizeBehaviour: 'crop',
+      },
       assets: {},
       pages: [
         {
@@ -986,10 +992,11 @@ test.describe('the file boundary', () => {
     expect(await objectCount(page)).toBe(count);
     expect(await isDirty(page)).toBe(true);
 
-    // And the accepted path really does replace the document.
+    // And the accepted path really does replace the document -- once the setup dialog
+    // that New now ends in is confirmed, since that is where the document is created.
     accept = true;
-    await page.locator('[data-doc="new"]').click();
-    await settle(page);
+    await openSetup(page);
+    await confirmSetup(page);
     expect(asked).toBe(2);
     expect(await objectCount(page)).toBe(0);
     expect(await isDirty(page)).toBe(false);

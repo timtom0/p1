@@ -22,6 +22,7 @@
 
 import type { Page } from '@playwright/test';
 
+import { CURRENT_FORMAT_VERSION } from '../../src/persist/format';
 import {
   beginDrag,
   clickAt,
@@ -570,7 +571,7 @@ test.describe('snap state never reaches the document', () => {
       expect(afterUndo.toLowerCase(), `the document contains "${needle}"`).not.toContain(needle);
     }
     // The format version is untouched: no bump was needed.
-    expect(JSON.parse(afterUndo).formatVersion).toBe(2);
+    expect(JSON.parse(afterUndo).formatVersion).toBe(CURRENT_FORMAT_VERSION);
   });
 
   test('the document refuses a saved guides key, so it cannot come back that way either', async ({ page }) => {

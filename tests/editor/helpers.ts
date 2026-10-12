@@ -474,3 +474,26 @@ export async function waitForAssetSettled(page: Page, oid: string, timeout = 800
     });
   }
 }
+
+/**
+ * Presses New and waits for the document-setup dialog to be modal.
+ *
+ * New no longer means "you now have a document": page size, the fixed-size default and the
+ * resize policy are authored choices (see `document-setup.ts`), so the gesture ends in a
+ * dialog. Tests that want an empty document have to confirm it the way a user would, and
+ * `confirmSetup` is the other half of this pair.
+ *
+ * The unsaved-work `confirm` comes first when the document is dirty, so a caller driving
+ * that path must accept the native dialog before calling this.
+ */
+export async function openSetup(page: Page): Promise<void> {
+  await page.click('[data-doc="new"]');
+  await page.waitForSelector('[data-document-setup][open]');
+}
+
+/** Confirms the setup dialog, creating a document from whatever it currently shows. */
+export async function confirmSetup(page: Page): Promise<void> {
+  await page.click('[data-setup-create]');
+  await page.waitForSelector('[data-document-setup]', { state: 'hidden' });
+  await settle(page);
+}
