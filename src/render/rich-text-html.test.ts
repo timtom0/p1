@@ -232,7 +232,7 @@ describe('richTextToHtml', () => {
         { kind: 'paragraph', runs: [{ text: 'Two' }] },
       ],
     });
-    expect(html).toBe('<p>One</p><p>Two</p>');
+    expect(html).toBe('<p dir="auto">One</p><p dir="auto">Two</p>');
   });
 
   it('writes alignment as an inline style, the way the browser does', () => {
@@ -242,7 +242,7 @@ describe('richTextToHtml', () => {
 
   it('omits the style when alignment is unset', () => {
     const html = htmlOf({ blocks: [{ kind: 'paragraph', runs: [{ text: 'x' }] }] });
-    expect(html).toBe('<p>x</p>');
+    expect(html).toBe('<p dir="auto">x</p>');
   });
 
   it('nests tags in a canonical order regardless of key order', () => {
@@ -254,18 +254,42 @@ describe('richTextToHtml', () => {
         },
       ],
     });
-    expect(html).toBe('<p><b><i><s>x</s></i></b></p>');
+    expect(html).toBe('<p dir="auto"><b><i><s>x</s></i></b></p>');
   });
 
   it('emits no <br>: a soft break is a literal newline rendered by pre-wrap', () => {
     const html = htmlOf({ blocks: [{ kind: 'paragraph', runs: [{ text: 'a\nb' }] }] });
-    expect(html).toBe('<p>a\nb</p>');
+    expect(html).toBe('<p dir="auto">a\nb</p>');
     expect(html).not.toContain('<br');
   });
 
   it('emits an empty paragraph with no filler element', () => {
     // CSS `min-height` gives it height; a `<br>` would be a second source of truth.
-    expect(htmlOf({ blocks: [{ kind: 'paragraph', runs: [{ text: '' }] }] })).toBe('<p></p>');
+    expect(htmlOf({ blocks: [{ kind: 'paragraph', runs: [{ text: '' }] }] })).toBe('<p dir="auto"></p>');
+  });
+
+  it('gives every paragraph `dir="auto"`, so neutral characters resolve against the text', () => {
+    // M21. The bidi algorithm orders strong characters correctly regardless, which is why an
+    // all-Arabic paragraph looked right with this attribute absent -- and why the defect was only
+    // visible in the *neutrals*. A trailing full stop after Arabic resolved against a left-to-right
+    // base and landed to the right of the sentence; measured in `typography-bidi` at x=806 against a
+    // first character at x=796.
+    //
+    // `auto` is per paragraph rather than one direction for the frame, so a frame can hold both an
+    // Arabic paragraph and an English one without a second document-level setting. It is a rendering
+    // attribute and deliberately not a model field: the document format does not record a direction,
+    // because the text itself determines it.
+    const html = htmlOf({
+      blocks: [
+        { kind: 'paragraph', runs: [{ text: 'one' }] },
+        { kind: 'paragraph', runs: [{ text: 'two' }] },
+        { kind: 'paragraph', runs: [{ text: 'three' }] },
+      ],
+    });
+    expect(html.match(/dir="auto"/g)).toHaveLength(3);
+    expect(html).toBe(
+      '<p dir="auto">one</p><p dir="auto">two</p><p dir="auto">three</p>',
+    );
   });
 
   it('refuses an unknown block kind rather than rendering an empty frame', () => {

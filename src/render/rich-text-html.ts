@@ -89,6 +89,24 @@ export function richTextToHtml(rich: RichText): DocumentFragment {
     }
 
     const paragraph = document.createElement('p');
+    // `dir="auto"` per paragraph, rather than one direction for the document.
+    //
+    // Without it the base paragraph direction is whatever the document says, which is nothing --
+    // so left-to-right. The Unicode bidirectional algorithm still orders *strong* characters
+    // correctly either way, which is why an all-Arabic paragraph looks right: `typography-bidi`
+    // measures that case and it passes. What it gets wrong is the **neutrals**, because a neutral
+    // character resolves against the base direction. A full stop after Arabic is neutral, so with
+    // an LTR base it lands to the *right* of the sentence it belongs to, and a line of Arabic
+    // ending in a colon puts the colon on the wrong side of the page.
+    //
+    // Measured, not assumed: the test asserting the trailing full stop lands with the Arabic
+    // failed at x=806 against a first character at x=796, and passes once this is set.
+    //
+    // `auto` is the browser's own first-strong heuristic -- the standard, non-custom answer -- and
+    // it is a rendering attribute rather than a model field, so the document format and ADR 0003's
+    // property placement are untouched. A paragraph beginning with a neutral has no strong
+    // character to go on and falls back to the document direction, which is today's behaviour.
+    paragraph.setAttribute('dir', 'auto');
     if (block.align !== undefined) paragraph.style.textAlign = block.align;
 
     for (const r of block.runs) {
