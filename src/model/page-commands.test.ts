@@ -43,6 +43,7 @@ import {
   rich,
 } from './factory';
 import { pageExtentPx } from './page';
+import { paintedBounds } from './transform';
 import { nodeIdsInPaintOrder } from './tree';
 import { pageSizesEqual } from './page-setup';
 import type { Document, Page, PageSize } from './types';
@@ -450,6 +451,42 @@ describe('setPageSize -- push', () => {
     expect(after.pages).toHaveLength(3);
   });
 
+  it('judges a rotated object by where it paints, not by its authored box', () => {
+    // `partitionByOverflow` measures `paintedBounds(node.transform)`, not the transform itself,
+    // and the difference is rotation and scale: a rotated object's painted box is the
+    // axis-aligned bounds of the rotated rectangle, which is larger than the box that was
+    // authored. Judging the authored box instead leaves on the page an object that visibly
+    // hangs off the bottom edge.
+    //
+    // Found by a mutation that survived: every other `push` fixture here is unrotated and
+    // unscaled, so `paintedBounds(t)` and `t` agree and the distinction was untested. The
+    // premise is asserted from `paintedBounds` itself rather than hand-computed, so this test
+    // states what it relies on instead of trusting a constant.
+    const transform = createTransform({ x: 50, y: 760, width: 200, height: 20, rotation: 0.5 });
+    const painted = paintedBounds(transform);
+    expect(
+      transform.y + transform.height,
+      'the authored box fits A5, so only the rotation can make this overflow',
+    ).toBeLessThanOrEqual(A5_PX.height);
+    expect(
+      painted.y + painted.height,
+      'the painted box hangs off the bottom of A5',
+    ).toBeGreaterThan(A5_PX.height);
+
+    const before = doc(
+      page('a', { objects: [createRectNode({ transform })] }),
+      page('b'),
+    );
+    const after = apply(before, {
+      type: 'setPageSize',
+      pageId: 'a',
+      size: A5,
+      behaviour: 'push',
+    });
+    expect(after.pages[0]!.objects, 'the rotated object moved off the resized page').toHaveLength(0);
+    expect(after.pages[1]!.objects).toHaveLength(1);
+  });
+
   it('judges a group by where it paints, and moves its children with it', () => {
     const d = doc(
       page('a', {
@@ -479,6 +516,17 @@ describe('setPageSize -- refusals and no-ops', () => {
     const before = doc(page('a'));
     const bad: PageSize = { width: 0.01, height: 297, unit: 'mm', orientation: 'portrait' };
     expect(apply(before, { type: 'setPageSize', pageId: 'a', size: bad })).toBe(before);
+  });
+
+  it('refuses a size past the far edge of the printable range, not only a tiny one', () => {
+    // The refusal above trips `MIN_PAGE_EDGE`. `MAX_PAGE_EDGE` is the other half of the same
+    // contract and was pinned by nothing: a page 500km across renders as nothing and prints as
+    // a blank sheet, which is the failure `pageSizeProblem` exists to prevent. Found by a
+    // mutation that survived -- raising `MAX_PAGE_EDGE` broke no test, because no test used a
+    // size large enough to reach it.
+    const before = doc(page('a'));
+    const huge: PageSize = { width: 6000, height: 297, unit: 'mm', orientation: 'portrait' };
+    expect(apply(before, { type: 'setPageSize', pageId: 'a', size: huge })).toBe(before);
   });
 
   it('does not treat a rotated size as the same size', () => {
