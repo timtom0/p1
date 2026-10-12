@@ -133,6 +133,20 @@ describe('normalizeRichText', () => {
     expect(result.blocks[0]?.runs).toEqual([{ text: 'ab', format: { bold: true } }]);
   });
 
+  it('drops an empty run even when it cannot merge away', () => {
+    // The case above is not enough on its own, and finding that out was the point. An empty run
+    // carrying the *same* format as its neighbours is absorbed by the merge whether or not empty
+    // runs are dropped -- so a mutation that removed the drop survived the first version of this
+    // test, which made it look like the drop was untested.
+    //
+    // An empty run with a *different* format has nowhere to merge: without the drop it survives as
+    // its own run, and the paragraph then renders a boundary that carries no text.
+    const result = normalizeRichText({
+      blocks: [paragraph([{ text: 'a' }, { text: '', format: { bold: true } }, { text: 'b' }])],
+    });
+    expect(result.blocks[0]?.runs).toEqual([{ text: 'ab' }]);
+  });
+
   it('gives an emptied paragraph one empty run, so the caret has somewhere to sit', () => {
     const result = normalizeRichText({ blocks: [paragraph([])] });
     expect(result.blocks[0]?.runs).toEqual([{ text: '' }]);

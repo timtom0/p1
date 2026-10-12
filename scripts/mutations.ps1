@@ -901,3 +901,80 @@ Add-Mutation 'every page selects the first page named sheet, so a mixed-size doc
   'src\ui\print-profile.ts' `
   { param($t) $t.Replace('printPageName(index)', 'printPageName(0)') } `
   'tests/editor/print-mixed-size.spec.ts'
+# ---------------------------------------------------------------------------
+# Typography (M21)
+# ---------------------------------------------------------------------------
+#
+# M21 reached three files the corpus had never looked at: `rich-text.ts` (the run/paragraph
+# normalisation that carries ADR 0003's property placement), the inspector's commit path, and the
+# formatting shortcut map. A 28-minute run was reporting a green gate over them.
+#
+# Each of these is a rule rather than a keystroke, and the ones worth killing are the ones whose
+# failure is invisible on screen. A normaliser that fails to merge runs of equal format renders
+# identically and only shows up as a document that re-saves differently each time. A toolbar that
+# reports "not bold" for a fully bold frame looks fine until someone relies on it. `dir="auto"`
+# missing costs nothing in a Latin document and misplaces a full stop at the end of an Arabic
+# sentence.
+#
+# `rich-text.ts` is aimed at by six and `rich-text.test.ts` is the target: these are pure functions
+# and their behaviour is only observable structurally, which is where it should be pinned.
+
+Add-Mutation 'adjacent runs with equal formatting are never merged, so the same text has many spellings' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (previous !== undefined && formatsEqual(previous.format, run.format)) {', 'if (false) {') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'runs with *different* formatting are merged, so formatting is lost at every boundary' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('formatsEqual(previous.format, run.format)', 'true') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'empty runs are kept, so a browser-emitted empty run defeats merging' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (run.text.length === 0) continue;', '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'an emptied paragraph keeps no run, so the caret has nowhere to sit' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (runs.length === 0) runs.push({ text: '''' });', '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'toggling a flag only ever adds it, so a second press does not remove it' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (next[flag] === true) delete next[flag];', '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'the toolbar reports a format as applied throughout when only some runs carry it' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (r.format?.[flag] !== true) return false;', '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'an emptied inspector field is a typo rather than an unset, so a value can never be taken back' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace("      raw === ''`n        ? undefined`n        : field.kind === 'length'", "      false`n        ? undefined`n        : field.kind === 'length'") } `
+  'tests/editor/typography-inspector.spec.ts'
+
+Add-Mutation 'an unbalanced quote in a font stack is accepted, so CSS silently discards the declaration' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace('  if (quote !== null || depth !== 0) return null;', '  if (depth !== 0) return null;') } `
+  'tests/editor/typography-inspector.spec.ts'
+
+Add-Mutation 'Ctrl+Shift+X is not bound, so strikethrough has no shortcut' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("return event.shiftKey ? 'strike' : null;", 'return null;') } `
+  'tests/editor/typography-shortcuts.spec.ts'
+
+Add-Mutation 'plain Ctrl+X toggles strikethrough, taking away cut' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("return event.shiftKey ? 'strike' : null;", "return 'strike';") } `
+  'tests/editor/typography-shortcuts.spec.ts'
+
+Add-Mutation 'the formatting shortcut is not suppressed inside a form field, so Ctrl+U opens view-source' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace('      if (isTypingTarget(event.target)) return;', '      if (false) return;') } `
+  'tests/editor/typography-shortcuts.spec.ts'
+
+Add-Mutation 'paragraphs carry no `dir`, so neutral characters resolve against an LTR base' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("paragraph.setAttribute('dir', 'auto');", '') } `
+  'src/render/rich-text-html.test.ts'
