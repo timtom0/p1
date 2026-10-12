@@ -54,16 +54,26 @@ export interface Inspector {
  * hand-written field per property is the alternative, and the seventh property would
  * then need an eighth block. Adding one becomes one entry here.
  */
-type TextFieldKey = 'fontSize' | 'lineHeight' | 'letterSpacing' | 'color';
+type TextFieldKey = 'fontFamily' | 'fontSize' | 'lineHeight' | 'letterSpacing' | 'color';
 
 interface TextFieldSpec {
   key: TextFieldKey;
   label: string;
-  /** `px` lengths go through the unit parser; multipliers and em are unitless. */
-  kind: 'length' | 'ratio' | 'colour';
+  /**
+   * `px` lengths go through the unit parser; multipliers and em are unitless.
+   *
+   * `family` is a free-text CSS font stack rather than an enumerated choice. The document records
+   * what the author wrote, and the browser decides what resolves: a stack that names a font this
+   * machine does not have falls through to the next family in the list, or to the UA default. The
+   * alternative -- a closed list of fonts we can prove are installed -- is a font management
+   * subsystem, and M21 explicitly does not build one. The control therefore accepts a stack and
+   * never claims a listed font is present.
+   */
+  kind: 'length' | 'ratio' | 'colour' | 'family';
 }
 
 const TEXT_FIELDS: readonly TextFieldSpec[] = [
+  { key: 'fontFamily', label: 'Font', kind: 'family' },
   { key: 'fontSize', label: 'Size', kind: 'length' },
   { key: 'lineHeight', label: 'Line', kind: 'ratio' },
   { key: 'letterSpacing', label: 'Track', kind: 'ratio' },
@@ -917,14 +927,30 @@ export function mountInspector(
     if (ids.length === 0) return;
 
     const raw = input.value.trim();
-    const parsed =
-      field.kind === 'length'
-        ? parseLength(raw, unit())
-        : field.kind === 'ratio'
-          ? parseRatio(raw)
-          : parseColor(raw);
 
-    if (parsed === null) {
+    // Empty means **unset**, not "invalid". The model defines an absent property as "the renderer
+    // emits nothing and CSS decides" (`TextStyle`), the section already *displays* that state as an
+    // empty field with a `-` placeholder, and `setTextStyle` already collapses an all-undefined
+    // style to no style at all. So the command could express "unset" the whole time -- but this
+    // path could not reach it: every parser returns `null` for `''`, and `null` was read as a typo
+    // and reverted. The result was an inspector where a value could be set and never taken back,
+    // which made "return this frame to the document default" unreachable for every property here.
+    //
+    // The two cases are not in tension. An empty field is a deliberate act; `0.` is a typo. One is
+    // a value the author can express, the other is a half-typed number that must not become a
+    // model value, so only the second reverts.
+    const parsed =
+      raw === ''
+        ? undefined
+        : field.kind === 'length'
+          ? parseLength(raw, unit())
+          : field.kind === 'ratio'
+            ? parseRatio(raw)
+            : field.kind === 'family'
+              ? parseFamily(raw)
+              : parseColor(raw);
+
+    if (raw !== '' && parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
       return;
@@ -934,6 +960,9 @@ export function mountInspector(
     store.mutate(ids.length > 1 ? `Text style ${ids.length} objects` : 'Typography', () => ({
       type: 'setTextStyle',
       ids,
+      // `undefined` in the patch *removes* the key: `setTextStyle` spreads the patch over the
+      // existing style, so an explicit `undefined` overwrites the old value with nothing. That is
+      // the model contract, not a trick -- and it is why clearing needs no separate command.
       patch: { [field.key]: parsed } as TextStylePatch,
     }));
   }
@@ -1303,6 +1332,57 @@ function formatRatio(value: number): string {
  */
 function parseColor(raw: string): string | null {
   return raw === '' ? null : raw;
+}
+
+/**
+ * Validates a CSS font stack, rejecting only what CSS itself cannot parse.
+ *
+ * ## What this deliberately does *not* do
+ *
+ * It does not check that a named font is installed. There is no portable way to ask, the answer
+ * differs per machine, and a control that listed only provably-present fonts would be a font
+ * management subsystem -- explicitly out of M21's scope. The document records the author's stack;
+ * the browser resolves it, falling through to the next family and finally to the UA default. A
+ * font that is missing is a fallback, which is the documented CSS behaviour and not an error state.
+ *
+ * ## Why validate at all
+ *
+ * Only for input CSS would discard wholesale, so the author gets a rejection at the field instead
+ * of a frame that silently renders in the default font. An unbalanced quote or bracket does exactly
+ * that: the declaration after it fails to parse, and the symptom -- wrong-looking text with no
+ * message -- is the worst kind of bug to chase back to a typo in a font name.
+ *
+ * Everything else is passed through untouched, including `var()` and `system-ui`.
+ */
+function parseFamily(raw: string): string | null {
+  if (raw === '') return null;
+
+  let quote: string | null = null;
+  let depth = 0;
+  for (const character of raw) {
+    // Control characters cannot appear in a font stack, and one embedded in the saved JSON makes
+    // the file unreadable in a diff. Scanned as code rather than as a regex so the rule for
+    // "a control character" lives here instead of in a character class nobody can read.
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return null;
+
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '(') depth += 1;
+    else if (character === ')') {
+      depth -= 1;
+      // An unmatched `)` invalidates everything after it, so reject rather than clamp.
+      if (depth < 0) return null;
+    }
+  }
+  if (quote !== null || depth !== 0) return null;
+  return raw;
 }
 
 /** `parseLength` already handles the authored unit; degrees have no unit parser. */
