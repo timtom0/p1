@@ -821,3 +821,82 @@ Add-Mutation 'the print profile is written once and never updated, so a newly op
   'src\ui\print-profile.ts' `
   { param($t) $t.Replace('    if (existing.textContent !== css) existing.textContent = css;', '    return css;') } `
   'tests/editor/print.spec.ts'
+
+# ---------------------------------------------------------------------------
+# Per-page dimensions (M20)
+# ---------------------------------------------------------------------------
+#
+# M20 added ~600 lines of page geometry across three new modules and reached none of them:
+# `page-resize.ts` and `page-setup.ts` had no mutants at all, so a 28-minute run was reporting a green
+# gate over code it had never touched. Each of these is aimed at a *decision* rather than a keystroke:
+#
+#  * `scale` fitting by the larger axis ratio instead of the smaller, which is the whole reason it is
+#    `min` -- content that fitted stops fitting, the exact opposite of the promise.
+#  * `push` judging a top-level node by its authored frame rather than where it *paints*, and pushing
+#    the two sets the wrong way round. `page-resize.ts` carries a comment recording that the first draft
+#    judged leaves instead of top-level nodes and silently skipped a straddling group; these two pin the
+#    distinction from both sides.
+#  * `pageSizesEqual` ignoring orientation, which would make a portrait/landscape flip a silent no-op.
+#  * `sizeForNewPage` dropping the `fixedSize` branch, collapsing a mixed-size document to uniform.
+#  * `remapNodeIds` not recursing, putting two nodes in one document under one id -- the collision
+#    `assertDocumentIsConsistent` refuses on load, so the mutant fails at *open*, not at the copy.
+#
+# All target `page-commands.test.ts`, which is where the semantics are pinned. The one exception is the
+# named-page selector, which needs a generated PDF to be falsifiable at all: a unit test can only prove
+# the CSS *says* `p0`, so it is aimed at `print-mixed-size.spec.ts`, which reads `/MediaBox` out of real
+# output.
+#
+# Two of these survived their first run, and both survivors were real holes rather than bad mutants --
+# `MAX_PAGE_EDGE` and `paintedBounds` were pinned by nothing. The tests that close them are in
+# `page-commands.test.ts` and say so where they are.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'scale fits by the larger axis ratio, so content overflows the page it was scaled for' `
+  'src\model\page-resize.ts' `
+  { param($t) $t.Replace('Math.min(byWidth, byHeight)', 'Math.max(byWidth, byHeight)') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'push judges the authored frame rather than the painted one, so a rotated object is judged on its unrotated box' `
+  'src\model\page-resize.ts' `
+  { param($t) $t.Replace('const bounds = paintedBounds(node.transform);', 'const bounds = node.transform;') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'push moves what still fits and keeps what overflows, so the wrong objects change page' `
+  'src\model\page-resize.ts' `
+  { param($t) $t.Replace('? fits : overflows', '? overflows : fits') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'scale moves x but not width, so content is scaled out of alignment with its own box' `
+  'src\model\page-resize.ts' `
+  { param($t) $t.Replace('width: transform.width * ratio,', 'width: transform.width,') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'a duplicated page keeps its descendants ids, so two nodes claim one identity' `
+  'src\model\page-resize.ts' `
+  { param($t) $t.Replace('children: input.children.map(walk)', 'children: input.children') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'orientation does not participate in page size equality, so flipping a page is a silent no-op' `
+  'src\model\page-setup.ts' `
+  { param($t) $t.Replace('a.orientation === b.orientation', 'true') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'a new page always inherits the preceding page, so fixedSize: true stops producing a uniform document' `
+  'src\model\page-setup.ts' `
+  { param($t) $t.Replace('if (setup.fixedSize) return clonePageSize(setup.defaultSize);', '') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'the printable page-edge limit is raised out of reach, so an unprintable page is accepted' `
+  'src\model\page-setup.ts' `
+  { param($t) $t.Replace('export const MAX_PAGE_EDGE = 5000;', 'export const MAX_PAGE_EDGE = 500000;') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'the last page can be deleted, so the document is left with no pages at all' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace('if (doc.pages.length <= 1) return doc;', 'if (doc.pages.length < 0) return doc;') } `
+  'src/model/page-commands.test.ts'
+
+Add-Mutation 'every page selects the first page named sheet, so a mixed-size document prints at one size' `
+  'src\ui\print-profile.ts' `
+  { param($t) $t.Replace('printPageName(index)', 'printPageName(0)') } `
+  'tests/editor/print-mixed-size.spec.ts'
