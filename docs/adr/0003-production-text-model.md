@@ -464,6 +464,66 @@ standard, non-custom answer — so nothing here implements Unicode's P2/P3 rules
 begins with a neutral has no strong character to go on and falls back to the document direction,
 which is the behaviour that already existed.
 
+### M22 — authored direction, indents and super/subscript
+
+M21's `dir="auto"` was a **rendering** attribute: nothing read it back, because nothing had to — it was
+derived. M22 makes direction authored, and that is the whole architectural difference. Every property
+M22 adds is persisted, and therefore has to survive the trip `setText` makes at the end of every editing
+session:
+
+    rendered DOM  ->  domToRichText  ->  RichText  ->  command  ->  document
+
+Before M22 the walker read **only `align`** back, which was sufficient because `align` was the only
+paragraph property there was. Adding persisted paragraph properties without extending the walker would
+have meant the *first keystroke anywhere in that frame* silently deleting them — no error, no visible
+symptom until the next reload. `readDirection` and `readMetrics` therefore sit beside `readAlign`, held
+in the same `flush`/`visit` state, and `rich-text-html.paragraph.test.ts` asserts the round trip for all
+nine new properties rather than only the interesting ones.
+
+**Two things the amendment changes in the record, not just the code.**
+
+*Paragraph properties are rebuilt, not spread.* `normalizeRichText`, `setTextAlign` and
+`applyInlineFormat` all rebuild a block field by field. That was complete when the fields were `kind`,
+`align` and `runs`; it silently deleted everything M22 added. The **browser** suite caught two of the
+three — centring a right-to-left paragraph discarded its direction and every indent — and the unit
+suite caught neither, which is why each of the three sites now has its own test and the rebuild shape is
+a mutant.
+
+*The `auto` story in the M21 amendment was imprecise, and it matters.* It said a paragraph beginning
+with a neutral "has no strong character for `auto` to go on". HTML's `dir=auto` scans *past* leading
+neutrals to the first strong character, so `. مرحبا` resolved RTL correctly all along. What genuinely
+requires an author is a paragraph with **no strong character anywhere** (`2026 - 42 %`), where `auto`
+falls back to the document direction. M21's neutrals finding was about which side a neutral *lands on*;
+conflating the two sent M22 looking for a defect that was not there.
+
+**Logical properties, deliberately.** All five metrics map to `text-indent`, `margin-inline-*` and
+`margin-block-*`. The start edge therefore follows the paragraph's own direction because CSS says so,
+not because any code in this repository knows what Arabic is. There is no `if (dir === 'rtl')` anywhere,
+which means no RTL branch to get wrong and no branch for a later test to cover. `typography-paragraph.spec.ts`
+measures the consequence in a real browser: a first-line indent moves to the right on an Arabic
+paragraph and stays on the left for an English one.
+
+**`super`/`sub` are two more true-only flags, not a baseline shift.** A baseline shift would be a
+*number*, and the type this whole model rests on is "`true` or absent" — one encoding of "not bold", so a
+document can never hold two spellings of the same visual text. They render as `<sup>`/`<sub>`, which are
+what the browser both produces and consumes, so the round trip needs no special case; `vertical-align` is
+read as well, because that is the spelling pasted HTML uses.
+
+**Format v4, and why a bump when nothing is required.** Three additions, all optional, so the
+*migration* is the absence of keys rather than a rewrite: a v3 document carries none of them, and absence
+already means what it meant in v3. The bump is required anyway, because the format's policy is *refuse,
+do not drop* — `expectOnlyKeys` means a v3 build reading a v4 document containing `dir` must refuse it
+**by name** rather than accept a paragraph it would then re-save without the field. That refusal needs a
+version to be refused by. `paragraphKeysFor` is the paragraph-level counterpart of `documentKeysFor`.
+`sample-v4.p1doc` is `sample-v3.p1doc` with the version changed, and a test asserts exactly that: one
+differing line, and it is the version line.
+
+**The one deliberate asymmetry.** `textIndent` is signed and the four margins are not. A hanging indent
+(`textIndent: -24` against a positive inset) is ordinary publishing and no other combination of these
+five fields expresses it; a negative *margin* means "overlap the neighbouring paragraph", which a
+fixed-size frame cannot honour safely, so it is refused by name rather than clamped. `parseParagraphMetrics`
+is where that line lives.
+
 ### M21 — the "unset" state of a `TextStyle` property is reachable from the UI
 
 This ADR defines an absent property as "the renderer emits nothing and CSS decides". That was true
@@ -480,6 +540,10 @@ an empty field is a deliberate act, `0.` is a typo, and only the second reverts.
 
 | Claim | Where |
 |---|---|
+| M22 round trip for all nine new properties | `src/render/rich-text-html.paragraph.test.ts` |
+| M22 command semantics, no-ops and mixed state | `tests/model/paragraph-commands.test.ts` |
+| M22 format v4, migration and refusal | `tests/persist/version4-migration.test.ts` |
+| M22 layout, editing, RTL/LTR, super/subscript, PDF | `tests/editor/typography-paragraph.spec.ts` |
 | `plaintext-only` produces no formatting; `contenteditable="true"` does | `tests/spike/format-probe.spec.ts`, `tests/spike/contenteditable-probe.spec.ts` — both **assert** the tables above, rather than only logging them |
 | Round trip is exact (one documented exception) | `src/render/rich-text-html.test.ts` |
 | Canonical form (adjacent equal-format runs merge) | `src/render/rich-text-html.test.ts` |

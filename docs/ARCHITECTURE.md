@@ -42,12 +42,13 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M19** Print profile & PDF export | **Done** — see [M19 notes](#m19-implementation-notes--print-profile-and-pdf-export) and [ADR 0018](adr/0018-print-profile-and-pdf-export.md). Export is `window.print()` against a print profile — no PDF writer and no second representation of the document. |
 | **M20** Page management | **Done - per-page dimensions, page commands, mixed-size PDF** - see [ADR 0019](adr/0019-per-page-dimensions.md) |
 | **M21** Typography foundation | **Done - the existing controls made reachable and real** - see [ADR 0003 amendments](adr/0003-production-text-model.md#amendments). `fontFamily` control added; the unset state of every `TextStyle` property made reachable; `Ctrl+B/I/U` bound outside a text session; `dir="auto"` per paragraph |
+| **M22** Advanced typography | **Done - authored direction, paragraph indents, super/subscript** - see [ADR 0003 amendments](adr/0003-production-text-model.md#m22--authored-direction-indents-and-super--subscript) and [M22 notes](#m22-implementation-notes--advanced-typography). Format **v4**. `ParagraphBlock.dir` and `.metrics`; five metrics mapped to CSS *logical* properties, so RTL correctness is a consequence of CSS rather than of a branch; `CharFormat.super`/`.sub`; the DOM walker reads all of it back |
 | M20+ | Not started |
 
-Twenty known limitations are recorded rather than hidden. Three of them are now closed and struck
+Twenty-six known limitations are recorded rather than hidden. Four of them are now closed and struck
 through rather than deleted - the selection outline in M11, group interaction in M13, orphaned assets in
-M14 - so a reader can see what was believed and when it stopped being true. None of the open seventeen
-blocks the next milestone:
+M14, and authored paragraph direction in M22 - so a reader can see what was believed and when it
+stopped being true. None of the open twenty-two blocks the next milestone:
 
 - **Lost external writes.** A model write to a frame being edited is deferred and
   replayed on session exit (see ADR 0001 finding 2). M3 widened the hook from text to
@@ -114,24 +115,70 @@ blocks the next milestone:
   discovered. Invariance is not achievable by adjusting a number:
   `vector-effect: non-scaling-stroke` is accepted by Chromium on an HTML element and then ignored,
   because it is defined for SVG geometry (ADR 0011 §9 F7, F8; ADR 0011b §5).
-- **Paragraph direction is inferred, not authored.** M21 added `dir="auto"` to every rendered
-  paragraph, which fixes the neutrals — a trailing full stop after Arabic now lands with its
-  sentence instead of at the right edge (measured in `tests/editor/typography-bidi.spec.ts`; see
+- ~~**Paragraph direction is inferred, not authored.**~~ **Fixed in M22.** M21 added `dir="auto"` to
+  every rendered paragraph, which fixed the neutrals — a trailing full stop after Arabic now lands with
+  its sentence instead of at the right edge (measured in `tests/editor/typography-bidi.spec.ts`; see
   [ADR 0003 amendments](adr/0003-production-text-model.md#m21--dirauto-on-every-rendered-paragraph)).
-  What remains is that **there is no way for an author to state a direction**. A paragraph beginning
-  with a neutral — `. مرحبا`, `— 2026` — has no strong character for `auto` to go on and falls back to
-  the document direction, which is left-to-right; and mixed-direction publishing (an English sentence
-  inside an Arabic one, which wants the paragraph base to stay RTL) cannot be expressed at all.
-  **M22 follow-up:** an explicit per-paragraph direction, which is a `ParagraphBlock` field, a format
-  key, and a UI control together — deliberately not started here, because adding it speculatively
-  would put a field in the format that this build cannot yet use.
+  What remained was that **there was no way for an author to state a direction**. `ParagraphBlock.dir`
+  (`auto` / `ltr` / `rtl`) is now persisted, authorable, and survives save; and the five indents are
+  applied as **CSS logical properties**, so the start edge follows the paragraph's own direction
+  because CSS says so rather than because any code here knows what Arabic is.
+
+  One correction to what this entry previously said, because the correction is the useful part: it
+  claimed a paragraph beginning with a neutral had "no strong character for `auto` to go on". That is
+  wrong. HTML's `dir=auto` scans *past* leading neutrals to the first strong character, so `. مرحبا`
+  resolved RTL correctly all along. What genuinely needs an author is a paragraph with **no strong
+  character anywhere** — `2026 - 42 %` — where `auto` falls back to the document direction. M21's
+  neutrals note was about which side a neutral *lands on*, not about detection; the two were conflated
+  here for one milestone, and `typography-paragraph.spec.ts` now pins the real case.
+- **Font weight is a boolean, so there are only two weights.** M22 audited the `CharFormat` flags and
+  added `super`/`sub` as more true-only flags, which is the shape this model rests on: `true` or
+  absent, so a document can never hold two spellings of the same visual text. A numeric weight needs
+  `false` and an arbitrary value, which is a *different* representation — and it is one M23's reusable
+  styles will have to get right once, for a whole property model, rather than have invented here for
+  one flag and then re-invented. Deferred with that reasoning rather than half-built.
+- **Only the logical margin spellings are read back.** `readMetrics` parses `margin-inline-start` and
+  friends, because those are what this renderer writes. Interpreting a physical `margin-left` would
+  mean deciding which edge is "start", which depends on the resolved direction — and a wrong guess
+  moves an author's indent to the wrong side of an Arabic paragraph. Recorded rather than guessed at.
+- **`textIndent` is signed; the four margins are not.** A hanging indent (`textIndent: -24` against a
+  positive inset) is ordinary publishing and is supported. A negative *margin* means "overlap the
+  neighbouring paragraph", which a fixed-size text frame cannot honour safely, so the parser refuses it
+  by name rather than clamping. The split is the model speaking, and `parseParagraphMetrics` is where
+  it lives.
+- **No reusable styles, tab stops, keep-with-next or per-paragraph line-height.** Deliberate, and each
+  for a stated reason. Reusable styles are M23 by instruction, and want the property model stable
+  first. Tab stops are disproportionate as a representation *and* as an editing affordance.
+  `keepWithNext` / `keepLinesTogether` need pagination, which a fixed-size frame has no way to honour —
+  stored and silently ignored would be worse than absent. Per-paragraph `lineHeight` duplicates
+  frame-level `lineHeight` without a layout engine that could justify the duplication, so it is
+  deferred with the rest of the measurement work below.
+- **Arabic shaping is the browser's, and that is a commitment rather than a gap.** No custom bidi
+  algorithm and no shaping engine; the model stores **logical** order and Chromium applies UAX#9 and
+  the Arabic shaping rules. Nothing here promises professional Arabic typesetting — kerning,
+  justification quality and mark positioning are the engine's. What *is* asserted, in
+  `tests/editor/typography-bidi.spec.ts` and `typography-paragraph.spec.ts`, is that this pipeline
+  does not reorder characters, does not split a combining sequence across runs, and resolves neutrals
+  as the author directed. See also [ADR 0003 amendments](adr/0003-production-text-model.md#m22--authored-direction-indents-and-super--subscript).
+- **Measurement is a readout, not a subsystem.** The inspector already reports laid-out text height and
+  whether a frame overflows (ADR 0004), and §6 of M22 investigated whether more was cheaply available:
+  `scrollHeight`/`getBoundingClientRect` answer "does this fit", and that question is already answered.
+  What they do **not** answer is "where would this paragraph flow if it moved to another frame", which
+  is what linked frames, auto-sizing and multi-column composition all need, and all three require
+  paragraph-aware layout that does not exist. Nothing derived from measurement is persisted: no glyph
+  positions, no DOM rectangles, no selection objects. The recommended shape for a future milestone is
+  a separate layout pass producing a *read-only* composition, with the document supplying only
+  authored intent — the same split as ADR 0004, scaled up.
 - **The screen and the PDF are not compared pixel-for-pixel.** Deliberate. Chromium's print engine
   re-shapes text, may substitute a font it cannot embed, and breaks lines differently, so an equality
   assertion would be untrue until it failed for a reason nobody could act on. What M21 *does* assert
   is narrower and provable: the authored families are the ones embedded (`/BaseFont` in the generated
   bytes), typography does not change pagination, and character presence and order survive — see
   `tests/editor/typography-print.spec.ts`. Glyph *shaping* in the PDF is a print-engine property and
-  is explicitly not claimed.
+  is explicitly not claimed. **M22 extended this rather than changing it:** the PDF tests for RTL and
+  for signed indents assert that the export pipeline runs and produces a well-formed PDF for such a
+  document, and say so in as many words. Comparing an RTL paragraph's layout between the two engines
+  would be a claim without evidence, and evidence is the whole point of the limitation.
 - ~~**The selection outline does not follow rotation.**~~ **Fixed in M11.** For nine milestones the
   overlay wrote `x/y/width/height` with **no transform**, so a rotated object was framed by an
   unrotated box at its model position — a rotated ellipse painted 171.2 x 156.6 inside a frame of
@@ -4524,3 +4571,91 @@ made a 3-page document print as **4 sheets**. It was invisible to every DOM asse
 `print-color-adjust` is separately unobservable headlessly: it does not change computed `background-color`,
 and Playwright's `printBackground` is Chromium's own switch. Those tests assert the instruction is present
 *and* that the colour reaches the PDF.
+
+## M22 implementation notes - Advanced typography
+
+M21 hardened the typography that existed. M22 adds to it, and the audit's single most important finding
+shaped everything else: **the DOM walker read back `align` and nothing else**, because `align` was the
+only paragraph property there was. Persisting new paragraph properties without extending the walker
+would have meant the first keystroke in a frame silently deleted them.
+
+### What was built, and what was deliberately not
+
+Built: `ParagraphBlock.dir` (`auto`/`ltr`/`rtl`), five paragraph metrics, `CharFormat.super`/`.sub`,
+an overflow readout that already existed (§6 below), and font handling that verifies rather than invents.
+
+Deferred, each with a reason recorded in the limitations list rather than left to be inferred:
+
+| Deferred | Why |
+|---|---|
+| Font weight beyond bold | A numeric weight needs `false` and an arbitrary value — a *different* representation, and M23's reusable styles will have to design it once for a whole property model. Inventing it here for one flag means designing it twice. |
+| Tab stops | Disproportionate as a representation *and* as an editing affordance. |
+| `keepWithNext` / `keepLinesTogether` | Need pagination a fixed-size frame cannot honour. Stored and ignored would be worse than absent. |
+| Per-paragraph `lineHeight` | Duplicates frame-level `lineHeight` with no layout engine to justify the duplication. |
+| Linked frames, auto-sizing, multi-column | Need the measurement subsystem below. |
+| Installed-font enumeration | Platform-specific infrastructure, and out of scope by instruction. |
+
+### The logical-property decision
+
+All five metrics map to `text-indent`, `margin-inline-start`, `margin-inline-end`, `margin-block-start`
+and `margin-block-end`. The consequence is that the start edge follows the paragraph's own direction
+**because CSS says so**, not because any code here knows what Arabic is. There is no `if (dir === 'rtl')`
+anywhere in the codebase, so there is no RTL branch to get wrong and no branch for a later test to cover.
+The cost is one stated limitation: `readMetrics` parses the *logical* spellings only, because
+interpreting a physical `margin-left` needs the resolved direction and a wrong guess moves an author's
+indent to the wrong side of an Arabic paragraph.
+
+### `readMetrics` parses the attribute, not the CSSOM — and the first version did not
+
+`readAlign` documents why: a computed `CSSStyleDeclaration` depends on the stylesheet having been
+applied, and happy-dom does not populate one from `innerHTML`. `readMetrics` was first written against
+`element.style`, for the good reason that Chromium may serialise a logical property however it likes.
+
+That was the wrong call, and it would have been **invisible**: every metric would have read as
+`undefined` under the unit suite while looking perfectly correct in Chromium. A test suite that quietly
+stops testing is worse than a missing one. The CSSOM also cannot recover what a naive regex over the
+attribute would — so both the logical-property mapping and the attribute are stated in one place.
+
+### Two real defects, found by the browser suite and not by the unit suite
+
+`setTextAlign` and `applyInlineFormat` rebuilt each paragraph **field by field** — `kind`, `align`,
+`runs` — which was complete when those were the only fields. Centring a right-to-left paragraph
+discarded its direction and every indent; bolding a word outside a session did the same. M21's
+`normalizeRichText` had the identical shape and the same fix.
+
+Three sites, one shape. A fourth paragraph property is exactly what would find it again, so all three
+now have their own test and the rebuild shape is a mutation. The lesson is about *where* the coverage
+had to come from: the unit suite reached none of them, and the browser suite reached two.
+
+### §6 of the milestone was already implemented
+
+The inspector's text section has reported laid-out height and whether a frame overflows since ADR 0004.
+Adding a second indicator would have been the wrong answer, so §6 is a **documentation** task, and the
+investigation's conclusion is recorded in the limitations: `scrollHeight` and `getBoundingClientRect`
+answer "does this fit", which is the question already answered; they do not answer "where would this
+paragraph flow if it moved to another frame", which is what linked frames, auto-sizing and multi-column
+composition all need. Nothing derived from measurement is persisted.
+
+### On the `auto` correction
+
+The M21 limitations entry said a paragraph beginning with a neutral "has no strong character for `auto`
+to go on". That is wrong — `dir=auto` scans *past* leading neutrals to the first strong character, and
+`. مرحبا` resolved RTL correctly throughout M21. What genuinely needs an author is a paragraph with **no
+strong character anywhere**, `2026 - 42 %`, where `auto` falls back to the document direction. M21's
+neutrals finding was about which side a neutral *lands on*, and conflating the two sent M22 looking for
+a defect that was not there. The limitation entry has been corrected in place rather than struck, because
+the misreading is the more useful record.
+
+### Shortcuts: what Chromium owns and what it does not
+
+Chromium binds Ctrl+B/I/U in a contenteditable and applies them itself, so those must not be
+re-dispatched — doing so toggles the format straight back off. It binds **no chord at all** for
+strikethrough, superscript or subscript, so before M22 those were advertised by the inspector and
+silently did nothing for the whole time the user was typing. `BROWSER_OWNS` states which is which and
+forwards only the unowned ones to `applyInlineFormat`, which inside a session is `execCommand`.
+
+Two keyboard-reading rules that look contradictory and are not. Everything binds on `event.key`, because
+`code` puts keys on the wrong physical positions outside a US layout. Superscript and subscript are the
+exception: Ctrl+Shift+. and Ctrl+Shift+, are defined by their *punctuation keys*, and Shift+`.` produces
+a different `key` on every layout, so those read `event.code` — otherwise they would work on a US
+keyboard and nowhere else.
