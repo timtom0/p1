@@ -27,8 +27,18 @@
  *    are dropped. Making that explicit is what keeps adding them a one-line change.
  */
 
-import type { CharFormat, InlineRun, ParagraphAlign, RichText, TextBlock } from '../model/types';
-import { formatsEqual, hasFormat, normalizeRichText } from '../model/rich-text';
+import type {
+  CharFormat,
+  InlineRun,
+  ParagraphAlign,
+  ParagraphDirection,
+  ParagraphMetrics,
+  RichText,
+  TextBlock,
+} from '../model/types';
+import { formatsEqual, hasFormat, normalizeRichText, PARAGRAPH_METRIC_KEYS } from '../model/rich-text';
+import { setStyle } from './dom-style';
+import { cssLength } from './num';
 
 /**
  * Canonical nesting order for run wrappers.
@@ -42,6 +52,11 @@ const WRAPPERS: ReadonlyArray<{ flag: keyof CharFormat; tag: string }> = [
   { flag: 'italic', tag: 'i' },
   { flag: 'underline', tag: 'u' },
   { flag: 'strike', tag: 's' },
+  // M22. `<sup>`/`<sub>` rather than a `vertical-align` span, for the reason the other four use
+  // tags: the browser both produces and consumes these, so a superscript made by the user *inside*
+  // a session and one restored from the model are the same DOM, and there is no second spelling.
+  { flag: 'super', tag: 'sup' },
+  { flag: 'sub', tag: 'sub' },
 ];
 
 /** Tags that carry no model meaning and are dropped wholesale. */
@@ -102,12 +117,25 @@ export function richTextToHtml(rich: RichText): DocumentFragment {
     // Measured, not assumed: the test asserting the trailing full stop lands with the Arabic
     // failed at x=806 against a first character at x=796, and passes once this is set.
     //
-    // `auto` is the browser's own first-strong heuristic -- the standard, non-custom answer -- and
-    // it is a rendering attribute rather than a model field, so the document format and ADR 0003's
-    // property placement are untouched. A paragraph beginning with a neutral has no strong
-    // character to go on and falls back to the document direction, which is today's behaviour.
-    paragraph.setAttribute('dir', 'auto');
+    // `auto` is the browser's own first-strong heuristic -- the standard, non-custom answer.
+    //
+    // M22 makes it *authorable*: `block.dir` overrides it, and only `auto` stays a rendering-only
+    // answer. Absent is `auto`, which is what every pre-M22 paragraph meant, so a document written
+    // before this milestone renders here exactly as it always did. An explicit `auto` is written the
+    // same way rather than omitted, so the attribute and the field cannot disagree.
+    paragraph.setAttribute('dir', block.dir ?? 'auto');
     if (block.align !== undefined) paragraph.style.textAlign = block.align;
+
+    // M22. Logical properties throughout, so the start edge follows this paragraph's own direction
+    // and there is no `if (dir === 'rtl')` anywhere in the codebase to get wrong. Writing them
+    // unconditionally, like `applyTypography` does, because a partial write would leave a previous
+    // paragraph's indent behind on a paragraph the user has just re-aligned.
+    const metrics = block.metrics;
+    setStyle(paragraph, 'text-indent', optionalLength(metrics?.textIndent));
+    setStyle(paragraph, 'margin-inline-start', optionalLength(metrics?.marginStart));
+    setStyle(paragraph, 'margin-inline-end', optionalLength(metrics?.marginEnd));
+    setStyle(paragraph, 'margin-block-start', optionalLength(metrics?.marginBefore));
+    setStyle(paragraph, 'margin-block-end', optionalLength(metrics?.marginAfter));
 
     for (const r of block.runs) {
       paragraph.append(runToNode(r));
@@ -116,6 +144,18 @@ export function richTextToHtml(rich: RichText): DocumentFragment {
   }
 
   return fragment;
+}
+
+/**
+ * A paragraph metric as an inline CSS length, or `''` to unset it.
+ *
+ * The `''` case is not a formatting convenience: `setStyle` calls `setProperty(name, '')`, which
+ * *removes* the property. Writing nothing instead would leave the previous paragraph's indent on an
+ * element the reconciler reused, which is the exact bug `applyTypography`'s "write every property
+ * unconditionally" note is about.
+ */
+function optionalLength(value: number | undefined): string {
+  return value === undefined ? '' : cssLength(value);
 }
 
 /** One run: its text node, wrapped once per set flag, in canonical order. */
@@ -166,28 +206,38 @@ export function domToRichText(root: Node): RichText {
   const blocks: TextBlock[] = [];
   let runs: InlineRun[] = [];
   let align: ParagraphAlign | undefined;
+  // M22. Held in step with `align`, and for the same reason: they are paragraph properties, read
+  // from the block element and re-emitted when the paragraph is flushed.
+  let dir: ParagraphDirection | undefined;
+  let metrics: ParagraphMetrics | undefined;
 
   /**
    * Ends the current paragraph.
    *
    * `force` distinguishes the two cases an empty run list can mean. Leaving a block
-   * element forces, because `<p></p>` *is* a paragraph — the one the browser leaves
-   * behind when a line is emptied — and dropping it would make consecutive blank
+   * element forces, because `<p></p>` *is* a paragraph - the one the browser leaves
+   * behind when a line is emptied - and dropping it would make consecutive blank
    * lines vanish. Entering one does not, because the text before it may be nothing
    * at all.
    */
   const flush = (force = false): void => {
     if (!force && runs.length === 0) {
       align = undefined;
+      dir = undefined;
+      metrics = undefined;
       return;
     }
     blocks.push({
       kind: 'paragraph',
       ...(align === undefined ? {} : { align }),
+      ...(dir === undefined ? {} : { dir }),
+      ...(metrics === undefined ? {} : { metrics }),
       runs: runs.length === 0 ? [{ text: '' }] : runs,
     });
     runs = [];
     align = undefined;
+    dir = undefined;
+    metrics = undefined;
   };
 
   const appendText = (value: string, format: CharFormat): void => {
@@ -222,9 +272,14 @@ export function domToRichText(root: Node): RichText {
     }
 
     const next = applyTag(element, format);
-    // `text-align` is read from the block itself. Descendants inherit it in CSS, so
-    // reading it from an inner wrapper would be guessing.
-    if (isBlock) align = readAlign(element) ?? align;
+    // Paragraph properties are read from the block itself. Descendants inherit them in CSS, so
+    // reading from an inner wrapper would be guessing -- `align` has always worked this way, and
+    // M22's `dir` and `metrics` join it for the same reason.
+    if (isBlock) {
+      align = readAlign(element) ?? align;
+      dir = readDirection(element) ?? dir;
+      metrics = readMetrics(element) ?? metrics;
+    }
 
     // A block that contains other blocks is a *container*, not a paragraph. `<div>`
     // wrapping two `<p>`s contributes no text of its own, and flushing it would emit a
@@ -251,6 +306,8 @@ export function domToRichText(root: Node): RichText {
     if (container) {
       runs = [];
       align = undefined;
+      dir = undefined;
+      metrics = undefined;
     } else {
       flush(true);
     }
@@ -291,6 +348,17 @@ function applyTag(element: Element, inherited: CharFormat): CharFormat {
     case 'DEL':
       next = { ...extend(), strike: true };
       break;
+    // M22. The mirror of the two entries in `WRAPPERS`, and load-bearing in the same way: a
+    // superscript the browser produced during a session and one this renderer produced from the
+    // model have to be the same tag, or an edit would rewrite one spelling into the other and the
+    // comparison would be a lie.
+    //
+    // `vertical-align` is read as the alternative spelling pasted HTML uses. `<sup>` wins when both
+    // are present, because that is the one this renderer writes.
+    case 'SUP':
+    case 'SUB':
+      next = { ...extend(), ...(tag === 'SUP' ? { super: true } : { sub: true }) };
+      break;
     case 'FONT': {
       const weight = element.getAttribute('weight')?.toLowerCase();
       if (weight !== null && weight !== undefined && weight !== 'normal') {
@@ -330,6 +398,10 @@ function applyInlineStyle(style: string, base: CharFormat): CharFormat {
   const weight = /(?:^|;)\s*font-weight\s*:\s*([^;]+)/.exec(lowered)?.[1]?.trim() ?? '';
   const face = /(?:^|;)\s*font-style\s*:\s*([^;]+)/.exec(lowered)?.[1]?.trim() ?? '';
   const decoration = /(?:^|;)\s*text-decoration(?:-line)?\s*:\s*([^;]+)/.exec(lowered)?.[1] ?? '';
+  // M22. `vertical-align` is the alternative spelling for super and subscript, and the one
+  // word processors' HTML uses. Read here so pasted superscript arrives as `super: true` instead of
+  // being flattened into plain text.
+  const baseline = /(?:^|;)\s*vertical-align\s*:\s*([^;]+)/.exec(lowered)?.[1]?.trim() ?? '';
 
   const format: CharFormat = { ...base };
 
@@ -337,6 +409,8 @@ function applyInlineStyle(style: string, base: CharFormat): CharFormat {
   if (face === 'italic' || face === 'oblique') format.italic = true;
   if (decoration.includes('underline')) format.underline = true;
   if (decoration.includes('line-through')) format.strike = true;
+  if (baseline === 'super') format.super = true;
+  if (baseline === 'sub') format.sub = true;
 
   return format;
 }
@@ -358,6 +432,84 @@ function readAlign(element: Element): ParagraphAlign | undefined {
   if (value === 'left' || value === 'start') return 'left';
   return undefined;
 }
+
+/**
+ * Reads a block element's base direction.
+ *
+ * `auto` and absent are the same answer, and returning `undefined` for `auto` is what makes the
+ * round-trip exact: a paragraph that was never given a direction reads back with no direction, so
+ * committing an edit does not write an explicit `auto` into a document that did not have one.
+ *
+ * The CSS `direction` property is read as well as the `dir` attribute, because pasted rich text
+ * carries it that way. Parsed from the attribute rather than through `getComputedStyle`, for the
+ * reason {@link readAlign} gives: a computed declaration depends on the stylesheet having been
+ * applied, and happy-dom does not populate one.
+ */
+function readDirection(element: Element): ParagraphDirection | undefined {
+  const style = element.getAttribute('style');
+
+  const attribute = element.getAttribute('dir')?.trim().toLowerCase();
+  if (attribute === 'ltr' || attribute === 'rtl') return attribute;
+  if (attribute === 'auto') return undefined;
+
+  const declared = style === null ? '' : /(?:^|;)\s*direction\s*:\s*([^;]+)/i.exec(style)?.[1]?.trim().toLowerCase() ?? '';
+  if (declared === 'ltr' || declared === 'rtl') return declared;
+  return undefined;
+}
+
+/**
+ * Reads a block element's indents and spacing back out of its inline style.
+ *
+ * Parsed from the `style` **attribute**, not through `element.style`, for exactly the reason
+ * {@link readAlign} states: a computed `CSSStyleDeclaration` depends on the environment having
+ * applied the stylesheet, and happy-dom does not populate one from `innerHTML`. Reading the CSSOM
+ * would have made every metric invisibly `undefined` under the unit suite while looking correct in
+ * the browser -- a test suite that quietly stops testing.
+ *
+ * Only the *logical* spellings are read. This renderer writes those, so they are what a round-trip
+ * sees, and interpreting a physical `margin-left` would mean deciding which edge is "start" --
+ * which depends on the resolved direction, and a wrong guess silently moves an author's indent to
+ * the wrong side of an Arabic paragraph. Recorded as a limitation rather than guessed at.
+ *
+ * A value CSS accepted but `parseFloat` cannot read is skipped. Persisting it as `NaN` would be
+ * worse: `NaN` serialises to `null`, which the parser then refuses, so one odd declaration pasted
+ * from a stranger would make the document unsaveable.
+ */
+function readMetrics(element: Element): ParagraphMetrics | undefined {
+  const style = element.getAttribute('style');
+  if (style === null) return undefined;
+
+  const metrics: ParagraphMetrics = {};
+  let any = false;
+
+  for (const key of PARAGRAPH_METRIC_KEYS) {
+    const property = METRIC_CSS_PROPERTY[key];
+    const raw = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, 'i').exec(style)?.[1]?.trim();
+    if (raw === undefined) continue;
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value)) continue;
+    metrics[key] = value;
+    any = true;
+  }
+
+  return any ? metrics : undefined;
+}
+
+/**
+ * Model metric key to the CSS property that carries it.
+ *
+ * All five are **logical**, which is the whole reason paragraph direction needs no branch anywhere:
+ * the start edge is whichever edge the paragraph's own `dir` says it is. A first-line indent on an
+ * Arabic paragraph therefore indents from the right because CSS says so, not because this file
+ * knows what Arabic is.
+ */
+const METRIC_CSS_PROPERTY: Readonly<Record<keyof ParagraphMetrics, string>> = {
+  marginBefore: 'margin-block-start',
+  marginAfter: 'margin-block-end',
+  marginStart: 'margin-inline-start',
+  marginEnd: 'margin-inline-end',
+  textIndent: 'text-indent',
+};
 
 /** The frame's current DOM text, for diagnostics and tests. Not a model projection. */
 export function domTextContent(root: Node): string {

@@ -18,6 +18,9 @@ import type {
   Page,
   PageSize,
   ParagraphAlign,
+  ParagraphBlock,
+  ParagraphDirection,
+  ParagraphMetrics,
   RichText,
   ShapeNode,
   TextFrameNode,
@@ -26,7 +29,12 @@ import type {
 } from './types';
 import { createId } from '../core/ids';
 import { createTransform, createGroupNode, createPage } from './factory';
-import { normalizeRichText, richTextEqual as richTextEquals } from './rich-text';
+import {
+  normalizeRichText,
+  PARAGRAPH_METRIC_KEYS,
+  paragraphMetricsEqual,
+  richTextEqual as richTextEquals,
+} from './rich-text';
 import { prunedAssetTable } from './assets';
 import { worldTransformIn, pageSizeToPx as pageExtentPx } from './transform';
 import { isGroup, locateNode, mapNodesByIdIn, removeNodesById } from './tree';
@@ -68,6 +76,23 @@ export type Command =
   | { type: 'setText'; nodeId: string; text: TextFrameNode['text'] }
   | { type: 'setTextStyle'; ids: readonly string[]; patch: TextStylePatch }
   | { type: 'setTextAlign'; nodeId: string; align: ParagraphAlign | null }
+  /**
+   * Sets every paragraph's base writing direction.
+   *
+   * `null` clears it, which means `auto` -- the browser decides from the content. That is the same
+   * shape `setTextAlign` uses for its own default, and for the same reason: an absent property and
+   * an explicit "let the browser choose" are the same paragraph, so they must not be two states.
+   */
+  | { type: 'setTextDirection'; nodeId: string; dir: ParagraphDirection | null }
+  /**
+   * Patches every paragraph's indent and spacing.
+   *
+   * A patch rather than a replacement, so setting one metric leaves the others -- the same
+   * argument `TextStylePatch` makes for frame typography. Only keys the patch *contains* are
+   * touched; a key written as `undefined` removes that metric, and clearing every metric is
+   * therefore spelled out key by key rather than implied by an empty patch.
+   */
+  | { type: 'setParagraphMetrics'; nodeId: string; patch: ParagraphMetricsPatch }
   | { type: 'setPageProps'; pageId: string; props: PagePropsPatch }
   // --- page management (M20) -------------------------------------------------------------------------------------
   /**
@@ -200,6 +225,15 @@ export type PagePropsPatch = Partial<Omit<Page, 'id' | 'objects' | 'size'>>;
  * patches rather than replaces.
  */
 export type TextStylePatch = Partial<TextStyle>;
+
+/**
+ * A patch to a paragraph's indents and spacing (M22).
+ *
+ * `Partial<ParagraphMetrics>` would already allow `undefined`, and is what this is -- named only so
+ * the command reads as a paragraph property rather than a frame one. The distinction matters:
+ * indents are per paragraph and a frame-level change rewrites all of them, exactly as alignment is.
+ */
+export type ParagraphMetricsPatch = Partial<ParagraphMetrics>;
 
 /**
  * Applies a command, returning a new document.
@@ -351,6 +385,66 @@ export function apply(doc: Document, command: Command): Document {
               ...(align === null ? {} : { align }),
               runs: block.runs,
             })),
+          }),
+        };
+      });
+    }
+
+    case 'setTextDirection': {
+      return mapNodesById(doc, [command.nodeId], (node) => {
+        if (node.type !== 'textFrame') return node;
+        const dir = command.dir;
+        // Same no-op rule as alignment: every paragraph already in this direction means the
+        // command would change nothing, and `isNoop` decides history from that.
+        if (node.text.blocks.every((block) => (block.dir ?? 'auto') === (dir ?? 'auto'))) return node;
+
+        return {
+          ...node,
+          text: normalizeRichText({
+            blocks: node.text.blocks.map((block) => ({
+              ...block,
+              ...(dir === null ? { dir: undefined } : { dir }),
+            })),
+          }),
+        };
+      });
+    }
+
+    case 'setParagraphMetrics': {
+      return mapNodesById(doc, [command.nodeId], (node) => {
+        if (node.type !== 'textFrame') return node;
+        const patch = command.patch;
+
+        // An all-undefined patch leaves every paragraph with no metrics at all, so collapse rather
+        // than write `metrics: {}` -- the same rule `setTextStyle` applies to the frame's style.
+        const merged = (block: ParagraphBlock): ParagraphMetrics | undefined => {
+          const next: ParagraphMetrics = { ...block.metrics };
+          for (const key of PARAGRAPH_METRIC_KEYS) {
+            // Presence, not `undefined`, is what decides. Treating an absent key as "clear" made
+            // `{ textIndent: 24 }` on a paragraph that already had `marginBefore: 4` silently drop
+            // the margin -- a patch that destroys what it did not mention. So a key the caller did
+            // not write is left alone, and a key the caller wrote as `undefined` is the explicit
+            // "remove this" spelling. Clearing everything is therefore spelled out key by key, which
+            // is what the inspector's reset button does.
+            if (!(key in patch)) continue;
+            const value = patch[key];
+            if (value === undefined) delete next[key];
+            else next[key] = value;
+          }
+          return Object.values(next).some((value) => value !== undefined) ? next : undefined;
+        };
+
+        if (node.text.blocks.every((block) => paragraphMetricsEqual(block.metrics, merged(block)))) {
+          return node;
+        }
+
+        return {
+          ...node,
+          text: normalizeRichText({
+            blocks: node.text.blocks.map((block) => {
+              const metrics = merged(block);
+              return { ...block, metrics };
+            }),
           }),
         };
       });
@@ -851,6 +945,10 @@ export function describeCommand(command: Command): string {
       return command.ids.length > 1 ? 'Text style' : 'Typography';
     case 'setTextAlign':
       return 'Align';
+    case 'setTextDirection':
+      return 'Text direction';
+    case 'setParagraphMetrics':
+      return 'Paragraph indent';
     case 'insert':
       return command.nodes.length > 1 ? `Insert ${command.nodes.length} objects` : 'Insert';
     case 'remove':
