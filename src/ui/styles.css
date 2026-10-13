@@ -710,14 +710,16 @@ body {
 }
 
 .p1-inspector-format,
-.p1-inspector-align {
+.p1-inspector-align,
+.p1-inspector-direction {
   display: flex;
   gap: 4px;
   padding: 0 12px 12px;
 }
 
 .p1-inspector-format button,
-.p1-inspector-align button {
+.p1-inspector-align button,
+.p1-inspector-direction button {
   flex: 1;
   min-width: 0;
   padding: 5px 4px;
@@ -730,7 +732,8 @@ body {
 }
 
 .p1-inspector-format button:hover,
-.p1-inspector-align button:hover {
+.p1-inspector-align button:hover,
+.p1-inspector-direction button:hover {
   background: #2f323b;
 }
 
@@ -739,8 +742,52 @@ body {
  * announced correctly and the styling follows from the attribute instead of being
  * toggled in two places that can disagree.
  */
+/*
+ * M22: the direction row and the indents grid.
+ *
+ * The direction row reuses the align row's layout wholesale -- same segmented buttons, same
+ * pressed state -- because it is the same control for the same kind of value. Only its padding
+ * differs: it is followed by the indents grid, so it keeps its bottom padding to separate itself
+ * from *that* and lets the grid supply the section's last margin.
+ */
+.p1-inspector-direction {
+  padding-bottom: 8px;
+}
+
+/*
+ * The indents grid sits under the direction row rather than inside the frame-typography grid
+ * above it, because indents are paragraph properties and that grid is frame typography. One grid
+ * holding both would mean one set of fields whose meaning depends on which command the button
+ * pressed -- and `setTextStyle` cannot express "this paragraph, not this frame".
+ *
+ * `aria-live` is not used on the clear button: it changes nothing about the document until it is
+ * pressed, so its enabled state is ordinary chrome state and announcing it on every selection
+ * change would be noise.
+ */
+.p1-inspector-metric-clear {
+  display: block;
+  margin: 0 12px 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+  background: #24262d;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.p1-inspector-metric-clear:hover:not(:disabled) {
+  background: #2f323b;
+}
+
+.p1-inspector-metric-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .p1-inspector-format button[data-active='true'],
-.p1-inspector-align button[data-active='true'] {
+.p1-inspector-align button[data-active='true'],
+.p1-inspector-direction button[data-active='true'] {
   background: var(--accent);
   border-color: var(--accent);
   color: #ffffff;

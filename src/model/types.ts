@@ -235,7 +235,15 @@ export type ParagraphDirection = 'auto' | 'ltr' | 'rtl';
  * never had an indent costs no bytes and inherits from the frame and the stylesheet.
  */
 export interface ParagraphMetrics {
-  /** Distance the first line is indented by, from the paragraph's start edge. */
+  /**
+   * Distance the first line is indented by, from the paragraph's start edge.
+   *
+   * **The one signed value here.** Negative means the first line hangs back out past the start of
+   * the rest of the paragraph, which combined with a positive {@link marginStart} is a hanging
+   * indent -- how every book is set, and not expressible any other way. The four margins are
+   * non-negative because a negative margin means "overlap the neighbour", a different feature that
+   * a fixed-size text frame has no safe way to honour.
+   */
   textIndent?: number;
   /** Inset from the start edge (right for `ltr`, left for `rtl`). */
   marginStart?: number;

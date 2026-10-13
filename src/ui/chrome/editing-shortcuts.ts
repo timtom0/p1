@@ -34,9 +34,29 @@ import type { CharFlag } from '../../model/rich-text';
  * provides and this one does not, so binding it would take away an operation to add a cosmetic one.
  * Chromium uses Ctrl+Shift+X for strikethrough, so the modifier matches the platform convention
  * rather than inventing one.
+ *
+ * **Superscript and subscript follow Chromium's own chords**, Ctrl+Shift+. and Ctrl+Shift+,,
+ * because those are the ones that exist in every other editor on the platform. They are read off
+ * `event.code` rather than `event.key`, which is the single departure from the rule above: the two
+ * chords are defined by their *punctuation keys*, and `Shift+.` produces a different `key` on every
+ * layout. Using `key` here would make the shortcut work on a US keyboard and nowhere else, which is
+ * the exact failure `shortcuts.ts` warns against. `Period` and `Comma` are the physical keys; shift
+ * is checked separately so an unmodified Ctrl+, (which browsers do not reserve) stays unbound.
  */
 function characterFormatFlag(event: KeyboardEvent): CharFlag | null {
   if (event.altKey) return null;
+
+  if (event.ctrlKey && event.shiftKey) {
+    switch (event.code) {
+      case 'Period':
+        return 'super';
+      case 'Comma':
+        return 'sub';
+      default:
+        break;
+    }
+  }
+
   switch (event.key.toLowerCase()) {
     case 'b':
       return 'bold';

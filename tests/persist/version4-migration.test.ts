@@ -153,7 +153,7 @@ describe('version-4 paragraph properties', () => {
     expect(() => parse(paragraph({ dir: 'sideways' as ParagraphBlock['dir'] }))).toThrow(/dir/);
   });
 
-  it('accepts all five metrics and refuses a negative one', () => {
+  it('accepts all five metrics', () => {
     const parsed = blocksOf(
       paragraph({
         metrics: {
@@ -166,8 +166,33 @@ describe('version-4 paragraph properties', () => {
       }),
     )[0]?.metrics;
     expect(parsed).toEqual({ textIndent: 24, marginStart: 12, marginEnd: 8, marginBefore: 4, marginAfter: 6 });
+  });
 
-    expect(() => parse(paragraph({ metrics: { textIndent: -1 } }))).toThrow(/textIndent/);
+  it('accepts a negative first-line indent, because that is what a hanging indent is', () => {
+    // The signed/unsigned split is the model speaking. A negative `textIndent` against a positive
+    // `marginStart` is how every book sets a hanging indent, and no other combination of these five
+    // fields expresses it.
+    expect(blocksOf(paragraph({ metrics: { textIndent: -24, marginStart: 24 } }))[0]?.metrics).toEqual({
+      textIndent: -24,
+      marginStart: 24,
+    });
+  });
+
+  it('refuses a negative margin, naming the key', () => {
+    // A negative margin means "overlap the neighbouring paragraph" -- a different feature, which a
+    // fixed-size frame cannot honour safely. Refused rather than clamped: a silently clamped file
+    // is a document that does not say what its author wrote.
+    expect(() => parse(paragraph({ metrics: { marginStart: -1 } }))).toThrow(/marginStart/);
+    expect(() => parse(paragraph({ metrics: { marginBefore: -1 } }))).toThrow(/marginBefore/);
+  });
+
+  it('refuses a non-finite metric rather than storing NaN or Infinity', () => {
+    // `NaN` serialises to `null` and `Infinity` survives it, so accepting either produces a file
+    // this build cannot read back.
+    expect(() => parse(paragraph({ metrics: { textIndent: Number.NaN } }))).toThrow(/textIndent/);
+    expect(() => parse(paragraph({ metrics: { marginAfter: Number.POSITIVE_INFINITY } }))).toThrow(
+      /marginAfter/,
+    );
   });
 
   it('refuses a metric key it does not know, rather than dropping it', () => {

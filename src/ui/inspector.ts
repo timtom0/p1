@@ -16,8 +16,22 @@
 import type { DocStore } from '../editor/store/doc-store';
 import type { Editor } from '../editor/editor';
 import { describeCommand } from '../model/commands';
-import type { Command, TextStylePatch, TransformPatch } from '../model/commands';
-import type { BlendMode, Document, ImageNode, Node, ParagraphAlign, ShapeNode } from '../model/types';
+import type {
+  Command,
+  ParagraphMetricsPatch,
+  TextStylePatch,
+  TransformPatch,
+} from '../model/commands';
+import type {
+  BlendMode,
+  Document,
+  ImageNode,
+  Node,
+  ParagraphAlign,
+  ParagraphDirection,
+  ParagraphMetrics,
+  ShapeNode,
+} from '../model/types';
 import { shapeHasInterior, shapeKinds, shapeSpec } from '../model/shapes';
 import { ASSET_STATE_LABELS, IMAGE_FITS, IMAGE_FIT_LABELS, findAsset } from '../model/assets';
 import type { PropertySpec } from '../model/shapes';
@@ -85,6 +99,48 @@ const PARAGRAPH_ALIGNS: ReadonlyArray<{ value: ParagraphAlign; label: string }> 
   { value: 'center', label: 'Centre' },
   { value: 'right', label: 'Right' },
   { value: 'justify', label: 'Justify' },
+];
+
+/**
+ * M22's direction control, in the same shape as {@link PARAGRAPH_ALIGNS} for the same reason: an
+ * enumeration with no free text.
+ *
+ * `Auto` sends `null`, which the model reads as *absent* rather than as an explicit `'auto'`. That
+ * is not pedantry -- it is what stops an editor round-trip from adding a field to every paragraph
+ * the user has not touched, and what keeps "clear this back to how it looked" reachable.
+ */
+const PARAGRAPH_DIRECTIONS: ReadonlyArray<{
+  value: ParagraphDirection | null;
+  label: string;
+  title: string;
+}> = [
+  { value: null, label: 'Auto', title: 'Detect the direction from the first strong character' },
+  { value: 'ltr', label: 'LTR', title: 'Force left-to-right' },
+  { value: 'rtl', label: 'RTL', title: 'Force right-to-left' },
+];
+
+/**
+ * M22's paragraph indents and spacing.
+ *
+ * Labelled in *logical* terms -- "Indent start", not "Indent left" -- because the value lands on
+ * whichever edge the paragraph's own direction says is the start. Labelling them physically would
+ * tell an Arabic author that a right-hand indent is "margin left", which is the exact confusion the
+ * logical properties exist to remove.
+ *
+ * Negative indents are a real thing -- a hanging indent is a negative `text-indent` against a
+ * positive `marginStart` -- so these fields accept them, unlike the persisted model, which only
+ * stores non-negative lengths. See {@link parseMetricLength}.
+ */
+const PARAGRAPH_METRIC_FIELDS: readonly {
+  key: keyof ParagraphMetrics;
+  label: string;
+  placeholder: string;
+}[] = [
+  { key: 'textIndent', label: 'First line', placeholder: 'No first-line indent' },
+  { key: 'marginStart', label: 'Indent start', placeholder: 'Flush to the start edge' },
+  { key: 'marginEnd', label: 'Indent end', placeholder: 'Flush to the end edge' },
+  { key: 'marginBefore', label: 'Space before', placeholder: 'None above' },
+  { key: 'marginAfter', label: 'Space after', placeholder: 'None below' },
 ];
 
 /**
@@ -664,6 +720,104 @@ export function mountInspector(
   textSection.append(alignRow);
 
   /**
+   * M22: direction, beside alignment rather than in the text grid above it.
+   *
+   * Placed next to alignment because the two are the pair a reader of a paragraph actually asks
+   * about -- "which way does this run, and where does it sit" -- and they are *independent*. A
+   * right-to-left paragraph may still be centred, and the control never infers one from the other.
+   *
+   * Segmented, like alignment, because it is an enumeration. Labelled "Direction" rather than
+   * "Reading order", because that is the word the CSS property uses and the one a user can map to
+   * what they see.
+   */
+  const directionRow = document.createElement('div');
+  directionRow.className = 'p1-inspector-align p1-inspector-direction';
+  directionRow.dataset['directionRow'] = 'true';
+
+  const directionButtons = new Map<ParagraphDirection | null, HTMLButtonElement>();
+  for (const direction of PARAGRAPH_DIRECTIONS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = direction.label;
+    button.title = direction.title;
+    // `dir` as the value: a null direction is not "unset" in the DOM sense, it is the Auto button.
+    button.dataset['dir'] = direction.value ?? 'auto';
+    button.addEventListener('click', () => {
+      const ids = textFrameIds();
+      if (ids.length === 0) return;
+      // One batch, so a multi-selection is a single undo step -- the rule the align row follows.
+      store.mutate('Text direction', () => ({
+        type: 'batch',
+        cmds: ids.map((id) => ({ type: 'setTextDirection', nodeId: id, dir: direction.value })),
+      }));
+    });
+    directionRow.append(button);
+    directionButtons.set(direction.value, button);
+  }
+  textSection.append(directionRow);
+
+  /**
+   * M22: indents and spacing, one grid.
+   *
+   * Separate from `TEXT_FIELDS` on purpose. Those are *frame* typography and are read through
+   * `commonTextStyle`, which fans out over frames; these are *paragraph* properties, so they are
+   * read through `commonMetric`, which fans out over paragraphs inside each frame. Merging the two
+   * would mean one grid whose entries meant two different things depending on which button was
+   * pressed -- and a single `TextStylePatch` cannot express "this paragraph, not this frame".
+   */
+  const metricGrid = document.createElement('div');
+  metricGrid.className = 'p1-inspector-grid';
+  metricGrid.dataset['metricGrid'] = 'true';
+
+  const metricInputs = new Map<keyof ParagraphMetrics, HTMLInputElement>();
+  for (const field of PARAGRAPH_METRIC_FIELDS) {
+    const label = document.createElement('label');
+    label.className = 'p1-inspector-field';
+
+    const caption = document.createElement('span');
+    caption.className = 'p1-inspector-field-label';
+    caption.textContent = field.label;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.className = 'p1-inspector-field-input';
+    input.dataset['metric'] = field.key;
+    input.placeholder = field.placeholder;
+    input.addEventListener('change', () => commitMetric(field.key, input));
+
+    label.append(caption, input);
+    metricGrid.append(label);
+    metricInputs.set(field.key, input);
+  }
+  textSection.append(metricGrid);
+
+  /** One "clear every indent and gap at once" button, rather than five separate erasers. */
+  const metricClear = document.createElement('button');
+  metricClear.type = 'button';
+  metricClear.className = 'p1-inspector-metric-clear';
+  metricClear.textContent = 'Clear indents';
+  metricClear.title = 'Remove every first-line indent, margin and gap from these paragraphs';
+  metricClear.addEventListener('click', () => {
+    const ids = textFrameIds();
+    if (ids.length === 0) return;
+    // Spelled out key by key rather than `{}`: `setParagraphMetrics` treats only the keys a patch
+    // *contains* as touched, so an empty patch would be inert and this button would do nothing.
+    const patch: ParagraphMetricsPatch = {
+      textIndent: undefined,
+      marginStart: undefined,
+      marginEnd: undefined,
+      marginBefore: undefined,
+      marginAfter: undefined,
+    };
+    store.mutate('Clear paragraph indent', () => ({
+      type: 'batch',
+      cmds: ids.map((id) => ({ type: 'setParagraphMetrics', nodeId: id, patch })),
+    }));
+  });
+  textSection.append(metricClear);
+
+  /**
    * Character-formatting toggles.
    *
    * These exist for discoverability as much as function: Ctrl+B works, but only once
@@ -681,6 +835,8 @@ export function mountInspector(
     ['italic', 'I', 'Italic (Ctrl+I)'],
     ['underline', 'U', 'Underline (Ctrl+U)'],
     ['strike', 'S', 'Strikethrough (Ctrl+Shift+X)'],
+    ['super', 'x²', 'Superscript (Ctrl+Shift+.)'],
+    ['sub', 'x₂', 'Subscript (Ctrl+Shift+,)'],
   ] as const) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -967,6 +1123,59 @@ export function mountInspector(
     }));
   }
 
+  /**
+   * M22: commits one paragraph metric.
+   *
+   * Empty means unset, on exactly the argument `commitText` makes and for exactly the same reason:
+   * the model, the stored file and this panel all agree that absent means "unset", so an empty field
+   * is the way back to the document default rather than an invalid entry.
+   *
+   * Signed, unlike the four margins. A hanging indent is `text-indent: -24px` against
+   * `margin-start: 24px`, which is how every book typeset indents are built; a parser that refused
+   * the minus sign would make the most common indent in publishing unenterable. `parseLength`
+   * already accepts a leading `-`, so nothing is needed to *read* one -- the boundary is the model,
+   * and `textIndent` is the one key that is signed there too.
+   */
+  function commitMetric(key: keyof ParagraphMetrics, input: HTMLInputElement): void {
+    const ids = textFrameIds();
+    if (ids.length === 0) return;
+
+    const raw = input.value.trim();
+    const parsed = raw === '' ? undefined : parseLength(raw, unit());
+
+    if (raw !== '' && parsed === null) {
+      input.value = input.dataset['shown'] ?? '';
+      input.classList.add('p1-inspector-field-input--invalid');
+      return;
+    }
+    input.classList.remove('p1-inspector-field-input--invalid');
+
+    // The one value the model genuinely cannot hold. `textIndent` is exempt: it is signed in
+    // CSS and in the model precisely so a hanging indent can be written as a negative first
+    // line against a positive inset, which is how books set them. The four margins are not
+    // signed, because a negative margin means "overlap the neighbour", which is a different
+    // feature and one this fixed-frame model has no way to make safe.
+    const negativeRejected = key !== 'textIndent';
+    if (parsed !== undefined && parsed !== null && parsed < 0 && negativeRejected) {
+      // Reverting the field and saying so beats committing a clamped value: a silent clamp is a
+      // document that does not match what the panel showed, and the user has no way to learn why.
+      input.value = input.dataset['shown'] ?? '';
+      input.classList.add('p1-inspector-field-input--invalid');
+      input.title = 'Margins and gaps cannot be negative.';
+      return;
+    }
+    input.title = '';
+
+    store.mutate(ids.length > 1 ? `Paragraph indent ${ids.length} objects` : 'Paragraph indent', () => ({
+      type: 'batch',
+      cmds: ids.map((id) => ({
+        type: 'setParagraphMetrics',
+        nodeId: id,
+        patch: { [key]: parsed } as ParagraphMetricsPatch,
+      })),
+    }));
+  }
+
   function syncTextSection(): void {
     const ids = textFrameIds();
     const frameIds = editor.selectionState.ids;
@@ -1003,6 +1212,42 @@ export function mountInspector(
     for (const [value, button] of alignButtons) {
       button.dataset['active'] = String(value === align);
     }
+
+    // M22. Direction reads the same way alignment does, and `auto` collapses to `undefined` on both
+    // the model side and here, so the Auto button lights up for a paragraph that never had a
+    // direction *and* for one that was explicitly set back to it. Two states, one button.
+    const direction = commonDirection(editor.doc, ids);
+    for (const [value, button] of directionButtons) {
+      button.dataset['active'] = String(value === direction);
+    }
+
+    // M22. Each metric is its own "Mixed" question: paragraphs in one frame can disagree about the
+    // indent and agree about the gap, and showing one blanket "Mixed" would hide that.
+    let anyMetric = false;
+    for (const field of PARAGRAPH_METRIC_FIELDS) {
+      const input = metricInputs.get(field.key);
+      if (input === undefined) continue;
+
+      const value = commonMetric(editor.doc, ids, field.key);
+      input.title = '';
+      if (value === undefined) {
+        input.value = '';
+        input.placeholder = ids.length > 1 ? 'Mixed' : field.placeholder;
+        input.dataset['shown'] = '';
+        // *Not* folded into the "is there anything to clear" test below: a Mixed value is
+        // `undefined` here and yet clearing it would change the document, so a button keyed off
+        // this would be disabled exactly when it was most useful.
+        if (anyMetricIn(editor.doc, ids, field.key)) anyMetric = true;
+        continue;
+      }
+
+      anyMetric = true;
+      input.placeholder = '';
+      const shown = formatLength(value, unit());
+      input.value = shown;
+      input.dataset['shown'] = shown;
+    }
+    metricClear.disabled = !anyMetric;
 
     // Format state has two sources, and the caller should not have to know which:
     // the browser while a session is open (where the model is stale by definition),
@@ -1286,6 +1531,92 @@ function commonTextStyle(
 }
 
 /** Shared alignment across a frame's paragraphs, or `undefined` when mixed. */
+/**
+ * M22: the direction shared by every paragraph of every selected frame, or `undefined` if they
+ * disagree.
+ *
+ * `auto` and absent are the same value, folded together here exactly as `setTextDirection` folds
+ * them. Folding only on the model side would make this function report "Mixed" for a frame whose
+ * paragraphs are all identical, and the Auto button would never light up for a paragraph that
+ * plainly is set to Auto.
+ */
+function commonDirection(doc: Document, ids: readonly string[]): ParagraphDirection | null | undefined {
+  let shared: ParagraphDirection | null | undefined;
+  let first = true;
+
+  for (const id of ids) {
+    const node = findNode(doc, id);
+    const directions = new Set<ParagraphDirection | null>(
+      node?.type === 'textFrame'
+        ? node.text.blocks.map((block) => block.dir ?? null)
+        : [],
+    );
+    const value = directions.size === 1 ? [...directions][0]! : null;
+
+    if (first) {
+      shared = value;
+      first = false;
+      continue;
+    }
+    // Two states, compared as one: `auto` and "never set" are the same answer.
+    if ((shared ?? null) !== (value ?? null)) return undefined;
+  }
+
+  return shared;
+}
+
+/**
+ * M22: one paragraph metric shared by every paragraph of every selected frame.
+ *
+ * Fanned out over *paragraphs*, not frames, which is what makes this different from
+ * `commonTextStyle` and why the two cannot share a helper: frame typography is one value on the
+ * frame, indents are a value on each paragraph inside it.
+ */
+function commonMetric(
+  doc: Document,
+  ids: readonly string[],
+  key: keyof ParagraphMetrics,
+): number | undefined {
+  let shared: number | undefined;
+  let first = true;
+
+  for (const id of ids) {
+    const node = findNode(doc, id);
+    const values = new Set<number | undefined>(
+      node?.type === 'textFrame'
+        ? node.text.blocks.map((block) => block.metrics?.[key])
+        : [],
+    );
+    const value = values.size === 1 ? [...values][0] : undefined;
+
+    if (first) {
+      shared = value;
+      first = false;
+      continue;
+    }
+    if (shared !== value) return undefined;
+  }
+
+  return shared;
+}
+
+/**
+ * M22: whether *any* paragraph holds this metric, even when they disagree.
+ *
+ * Separate from `commonMetric` because "what do the selected paragraphs agree on" and "is there
+ * anything here to clear" are different questions, and answering the second with the first is how a
+ * Clear button ends up disabled on a Mixed selection -- that is, on exactly the selection where it
+ * is most useful.
+ */
+function anyMetricIn(doc: Document, ids: readonly string[], key: keyof ParagraphMetrics): boolean {
+  for (const id of ids) {
+    const node = findNode(doc, id);
+    if (node?.type !== 'textFrame') continue;
+    if (node.text.blocks.some((block) => block.metrics?.[key] !== undefined)) return true;
+  }
+  return false;
+}
+
 function commonAlign(doc: Document, ids: readonly string[]): ParagraphAlign | undefined {
   let shared: ParagraphAlign | undefined;
   let first = true;

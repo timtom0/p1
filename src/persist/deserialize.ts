@@ -701,7 +701,15 @@ function parseParagraph(input: unknown, path: string, version: number): Paragrap
   return block;
 }
 
-/** Every metric is a length, so every one is validated as a finite non-negative document px. */
+/**
+ * Every metric is a length, so every one is validated as finite -- but only `textIndent` is allowed
+ * to be negative.
+ *
+ * That asymmetry is the model speaking, not a parsing detail. A negative first-line indent against a
+ * positive margin is a hanging indent, which is ordinary publishing; a negative *margin* would mean
+ * overlapping the neighbouring paragraph, which a fixed-size frame cannot make safe. The former is
+ * accepted, the latter is refused by name rather than clamped.
+ */
 function parseParagraphMetrics(input: unknown, path: string): ParagraphMetrics {
   const record = expectRecord(input, path);
   expectOnlyKeys(record, path, PARAGRAPH_METRIC_KEYS);
@@ -709,7 +717,7 @@ function parseParagraphMetrics(input: unknown, path: string): ParagraphMetrics {
   for (const key of PARAGRAPH_METRIC_KEYS) {
     const value = record[key];
     if (value === undefined) continue;
-    metrics[key] = expectNonNegative(value, `${path}.${key}`);
+    metrics[key] = key === 'textIndent' ? expectFinite(value, `${path}.${key}`) : expectNonNegative(value, `${path}.${key}`);
   }
   return metrics;
 }
