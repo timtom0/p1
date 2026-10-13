@@ -974,10 +974,11 @@ Add-Mutation 'the formatting shortcut is not suppressed inside a form field, so 
   { param($t) $t.Replace('      if (isTypingTarget(event.target)) return;', '      if (false) return;') } `
   'tests/editor/typography-shortcuts.spec.ts'
 
-Add-Mutation 'paragraphs carry no `dir`, so neutral characters resolve against an LTR base' `
+Add-Mutation 'every paragraph resolves against a fixed LTR base instead of the authored direction' `
   'src\render\rich-text-html.ts' `
-  { param($t) $t.Replace("paragraph.setAttribute('dir', 'auto');", '') } `
+  { param($t) $t.Replace("paragraph.setAttribute('dir', block.dir ?? 'auto');", "paragraph.setAttribute('dir', 'ltr');") } `
   'src/render/rich-text-html.test.ts'
+
 # ---------------------------------------------------------------------------
 # Paragraph direction, indents and spacing, super and subscript (M22)
 # ---------------------------------------------------------------------------
@@ -1006,6 +1007,11 @@ Add-Mutation 'paragraphs carry no `dir`, so neutral characters resolve against a
 # The `metricState` pair is aimed at the field *label*, not the value: collapsing "mixed" back into
 # `undefined` makes an inspector show "No first-line indent" over three paragraphs where two have
 # one, which is false rather than merely unhelpful.
+# One entry that *looks* like it belongs here is deliberately not: "every paragraph resolves against a
+# fixed LTR base instead of the authored direction" is M21's `dir="auto"` mutant, kept in the M21 block
+# because that is where it was written. Its substitution changed when M22 made `dir` authorable -- it
+# used to delete the attribute, and now it pins the base direction -- but the claim it makes is M21's,
+# so its identity is M21's.
 # ---------------------------------------------------------------------------
 
 Add-Mutation 'an absent paragraph direction reads as ltr instead of as nothing' `
@@ -1013,10 +1019,6 @@ Add-Mutation 'an absent paragraph direction reads as ltr instead of as nothing' 
   { param($t) $t.Replace("if (attribute === 'auto') return undefined;", "if (attribute === 'auto') return 'ltr';") } `
   'src/render/rich-text-html.paragraph.test.ts'
 
-Add-Mutation 'the renderer writes ltr for a paragraph that never declared a direction' `
-  'src\render\rich-text-html.ts' `
-  { param($t) $t.Replace("paragraph.setAttribute('dir', block.dir ?? 'auto');", "paragraph.setAttribute('dir', block.dir ?? 'ltr');") } `
-  'src/render/rich-text-html.paragraph.test.ts'
 
 Add-Mutation 'normalizeRichText drops the paragraph direction' `
   'src\model\rich-text.ts' `
