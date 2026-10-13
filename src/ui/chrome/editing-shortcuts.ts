@@ -71,6 +71,26 @@ function characterFormatFlag(event: KeyboardEvent): CharFlag | null {
   }
 }
 
+/**
+ * Which flags Chromium applies itself, with no chord of its own needed.
+ *
+ * Exists to answer one question: inside a text session, is this keystroke already handled? For
+ * bold, italic and underline it is -- the browser binds Ctrl+B/I/U in a contenteditable and runs
+ * `execCommand` before this handler is even consulted. Calling ours as well would toggle the format
+ * back off, which reads as "the shortcut does nothing".
+ *
+ * Everything else is absent from this map, which means *not* handled: Chromium binds no chord for
+ * strikethrough, superscript or subscript, so those must be forwarded or they never fire.
+ */
+const BROWSER_OWNS: Readonly<Record<CharFlag, boolean>> = {
+  bold: true,
+  italic: true,
+  underline: true,
+  strike: false,
+  super: false,
+  sub: false,
+};
+
 export interface EditingShortcutOptions {
   editor: Editor;
   /** Nudge distance in document px. Shift multiplies it by ten. */
@@ -98,6 +118,24 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
       if (event.key === 'Escape') {
         event.preventDefault();
         editor.endTextEdit();
+        return;
+      }
+
+      // Chromium owns Ctrl+B/I/U inside a contenteditable and applies them to the live selection
+      // itself, so re-dispatching them would toggle the format straight back off. Those three are
+      // therefore left alone -- which is exactly what the early return above used to mean for every
+      // flag.
+      //
+      // The others it does *not* own. Chromium has no superscript, subscript or strikethrough chord
+      // in a contenteditable, so for those the keystroke would simply vanish: a shortcut the
+      // inspector advertises and the user tries, doing nothing. They are forwarded to
+      // `applyInlineFormat`, which inside a session is `execCommand` against the browser -- the same
+      // call the inspector buttons make, so there is still one implementation per behaviour.
+      const inside = characterFormatFlag(event);
+      if ((event.ctrlKey || event.metaKey) && inside !== null && !BROWSER_OWNS[inside]) {
+        event.preventDefault();
+        const frameId = editor.selectionState.primary;
+        if (frameId !== null) editor.textSession?.applyInlineFormat(inside, frameId);
       }
       return;
     }

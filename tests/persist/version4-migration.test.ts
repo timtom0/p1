@@ -32,7 +32,7 @@ import { serializeToString } from '../../src/persist/serialize';
 import { CURRENT_FORMAT_VERSION, MINIMUM_FORMAT_VERSION } from '../../src/persist/format';
 import { normalizeRichText } from '../../src/model/rich-text';
 import { documentsEqual } from '../../src/model/document-equality';
-import type { ParagraphBlock, TextFrameNode } from '../../src/model/types';
+import type { CharFormat, ParagraphBlock, TextFrameNode } from '../../src/model/types';
 
 const GOLDEN_V4 = fileURLToPath(new URL('../golden/sample-v4.p1doc', import.meta.url));
 const GOLDEN_V3 = fileURLToPath(new URL('../golden/sample-v3.p1doc', import.meta.url));
@@ -208,6 +208,20 @@ describe('version-4 paragraph properties', () => {
     const back = blocksOf(JSON.parse(saved) as unknown)[0];
     expect(back?.dir).toBe('rtl');
     expect(back?.metrics).toEqual({ textIndent: 18, marginBefore: 6 });
+  });
+
+
+it('super and subscript survive the file, not just the DOM', () => {
+    // The DOM round-trip is covered in `rich-text-html.paragraph.test.ts`; this is the other half,
+    // and it exists because `canonicalRichText` rebuilds each run's format from a *list* of flags.
+    // Adding two flags to the model without adding them to that list drops them on every save --
+    // silently, because the document still loads and still renders the text, just unformatted.
+    // Nothing else in the persist suite would have caught it.
+    for (const format of [{ super: true }, { sub: true }, { bold: true, super: true }] satisfies CharFormat[]) {
+      const saved = serializeToString(parse(paragraph({ runs: [{ text: 'x', format }] })));
+      const block = blocksOf(JSON.parse(saved) as unknown)[0];
+      expect(block?.runs[0]?.format, `format ${JSON.stringify(format)} was lost`).toEqual(format);
+    }
   });
 
   it('refuses `dir` and `metrics` in a version-3 paragraph', () => {

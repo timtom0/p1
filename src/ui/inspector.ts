@@ -1228,11 +1228,15 @@ export function mountInspector(
       const input = metricInputs.get(field.key);
       if (input === undefined) continue;
 
-      const value = commonMetric(editor.doc, ids, field.key);
+      const state = metricState(editor.doc, ids, field.key);
       input.title = '';
-      if (value === undefined) {
+      if (state.value === undefined) {
         input.value = '';
-        input.placeholder = ids.length > 1 ? 'Mixed' : field.placeholder;
+        // "Mixed" whenever the paragraphs disagree -- including inside a *single* frame, which is
+        // the case M22 created. The frame-typography fields above can only disagree across frames,
+        // so theirs keys off `ids.length > 1`; a paragraph metric can disagree three paragraphs into
+        // one frame, and "No first-line indent" there states something false.
+        input.placeholder = state.mixed ? 'Mixed' : field.placeholder;
         input.dataset['shown'] = '';
         // *Not* folded into the "is there anything to clear" test below: a Mixed value is
         // `undefined` here and yet clearing it would change the document, so a button keyed off
@@ -1243,7 +1247,7 @@ export function mountInspector(
 
       anyMetric = true;
       input.placeholder = '';
-      const shown = formatLength(value, unit());
+      const shown = formatLength(state.value, unit());
       input.value = shown;
       input.dataset['shown'] = shown;
     }
@@ -1566,38 +1570,34 @@ function commonDirection(doc: Document, ids: readonly string[]): ParagraphDirect
 }
 
 /**
- * M22: one paragraph metric shared by every paragraph of every selected frame.
+ * M22: one paragraph metric, with "the paragraphs disagree" reported separately from "no value".
  *
  * Fanned out over *paragraphs*, not frames, which is what makes this different from
  * `commonTextStyle` and why the two cannot share a helper: frame typography is one value on the
  * frame, indents are a value on each paragraph inside it.
+ *
+ * The two answers are deliberately not collapsed into one `number | undefined`. A frame whose three
+ * paragraphs carry no indent and a frame whose first carries 40px and the other two none both
+ * produce `undefined`, and the panel cannot say the same thing about both: the first shows its
+ * own placeholder, the second must show "Mixed". Returning a discriminated pair is the difference
+ * between a field that states something false and one that does not.
  */
-function commonMetric(
+function metricState(
   doc: Document,
   ids: readonly string[],
   key: keyof ParagraphMetrics,
-): number | undefined {
-  let shared: number | undefined;
-  let first = true;
-
+): { value: number | undefined; mixed: boolean } {
+  // Every value any selected paragraph holds, `undefined` included, so a paragraph with no metric
+  // participates in the comparison rather than being skipped by it.
+  const seen = new Set<number | undefined>();
   for (const id of ids) {
     const node = findNode(doc, id);
-    const values = new Set<number | undefined>(
-      node?.type === 'textFrame'
-        ? node.text.blocks.map((block) => block.metrics?.[key])
-        : [],
-    );
-    const value = values.size === 1 ? [...values][0] : undefined;
-
-    if (first) {
-      shared = value;
-      first = false;
-      continue;
-    }
-    if (shared !== value) return undefined;
+    if (node?.type !== 'textFrame') continue;
+    for (const block of node.text.blocks) seen.add(block.metrics?.[key]);
   }
 
-  return shared;
+  if (seen.size > 1) return { value: undefined, mixed: true };
+  return { value: [...seen][0], mixed: false };
 }
 
 /**

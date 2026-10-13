@@ -180,6 +180,53 @@ describe('normalizeRichText', () => {
     expect(result.blocks[1]?.align).toBeUndefined();
   });
 
+it('preserves the paragraph properties M22 added while merging runs', () => {
+    // `normalizeRichText` *rebuilds* each block rather than spreading it, so every property has to be
+    // carried across by hand. That is the mechanism behind both of M22's real data-loss defects --
+    // the same rebuild shape in `setTextAlign` and `applyInlineFormat` also dropped these fields, and
+    // the browser suite caught those while this one did not. Pinned here so the third occurrence has
+    // to be caught by a unit test rather than by a user.
+    const result = normalizeRichText({
+      blocks: [
+        { ...paragraph([{ text: 'a' }, { text: 'b' }], 'center'), dir: 'rtl', metrics: { textIndent: 24 } },
+        { ...paragraph([{ text: 'c' }]), dir: 'ltr' },
+      ],
+    });
+    expect(result.blocks[0]?.runs, 'runs were not merged').toEqual([{ text: 'ab' }]);
+    expect(result.blocks[0]?.align).toBe('center');
+    expect(result.blocks[0]?.dir).toBe('rtl');
+    expect(result.blocks[0]?.metrics).toEqual({ textIndent: 24 });
+    expect(result.blocks[1]?.dir).toBe('ltr');
+    // Absent stays absent: an all-undefined metrics object is a second spelling of "unset".
+    expect(result.blocks[1]?.metrics).toBeUndefined();
+    expect(result.blocks[1]?.dir).not.toBe('auto');
+  });
+
+  it('copies the metrics object rather than sharing it', () => {
+    // Aliasing would let a later edit mutate a paragraph that is supposed to be a snapshot of an
+    // earlier one -- the kind of bug that shows up as a history entry that does not match the state
+    // it should have captured.
+    const metrics = { textIndent: 8 };
+    const result = normalizeRichText({ blocks: [{ ...paragraph([{ text: 'a' }]), metrics }] });
+    metrics.textIndent = 99;
+    expect(result.blocks[0]?.metrics?.textIndent, 'the normalised block aliased its input').toBe(8);
+  });
+
+  it('notices a changed direction and a changed indent', () => {
+    // `richTextEqual` is what decides whether a command is a no-op at all, so leaving these out would
+    // make a paragraph-property edit record no history and be undone by nothing.
+    const base = { blocks: [{ ...paragraph([{ text: 'a' }]), dir: 'rtl' as const, metrics: { textIndent: 8 } }] };
+    expect(richTextEqual(base, base)).toBe(true);
+    expect(
+      richTextEqual(base, { blocks: [{ ...paragraph([{ text: 'a' }]), dir: 'ltr', metrics: { textIndent: 8 } }] }),
+      'a changed direction compared equal',
+    ).toBe(false);
+    expect(
+      richTextEqual(base, { blocks: [{ ...paragraph([{ text: 'a' }]), dir: 'rtl', metrics: { textIndent: 9 } }] }),
+      'a changed indent compared equal',
+    ).toBe(false);
+  });
+
   it('leaves soft line breaks inside their run', () => {
     // A soft break is a `\n` *within* a paragraph, produced by Shift+Enter. Normalisation must
     // neither split on it nor trim around it, or Shift+Enter would silently become Enter.

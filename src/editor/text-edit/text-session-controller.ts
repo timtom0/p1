@@ -185,8 +185,10 @@ export class TextSessionController {
     const current = this.frameText(frameId);
     const next = normalizeRichText({
       blocks: current.blocks.map((block) => ({
-        kind: block.kind,
-        ...(block.align === undefined ? {} : { align: block.align }),
+        // Spreads the block and keeps only `runs` below. Rebuilding field by field would drop
+        // `dir` and `metrics`, so bolding a word outside a text session silently reset the
+        // paragraph's direction and erased its indents -- the same bug `setTextAlign` had.
+        ...block,
         runs: block.runs.map((r) => {
           const format: CharFormat | undefined = toggleFlag(r.format, flag);
           return format === undefined ? { text: r.text } : { text: r.text, format };

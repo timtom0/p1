@@ -381,9 +381,13 @@ export function apply(doc: Document, command: Command): Document {
           ...node,
           text: normalizeRichText({
             blocks: node.text.blocks.map((block) => ({
-              kind: block.kind,
+              // Spreads the block rather than rebuilding it field by field. Rebuilding was
+              // correct when `align` and `runs` were the only fields, and silently deleted
+              // everything M22 added: centring a right-to-left paragraph discarded its direction
+              // and every indent, with no error and nothing in the UI to show for it.
+              // M21's `normalizeRichText` had the same shape of bug and the same fix.
+              ...block,
               ...(align === null ? {} : { align }),
-              runs: block.runs,
             })),
           }),
         };

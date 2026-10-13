@@ -978,3 +978,142 @@ Add-Mutation 'paragraphs carry no `dir`, so neutral characters resolve against a
   'src\render\rich-text-html.ts' `
   { param($t) $t.Replace("paragraph.setAttribute('dir', 'auto');", '') } `
   'src/render/rich-text-html.test.ts'
+# ---------------------------------------------------------------------------
+# Paragraph direction, indents and spacing, super and subscript (M22)
+# ---------------------------------------------------------------------------
+#
+# M22 added a persisted paragraph shape, a walker that reads it back, and six flags, and the
+# interesting decisions are all of the form "what does *absent* mean". That is what this section is
+# aimed at, because every one of them produces a document that loads, saves and renders without an
+# error while meaning something else -- the exact class of defect a green suite otherwise reports as
+# success.
+#
+#  * `dir` defaulting to `'ltr'` on read instead of to nothing. The renderer would still set an
+#    attribute, the file would still round-trip, and every neutral in every Arabic paragraph would
+#    resolve the wrong way.
+#  * `normalizeRichText` dropping `dir`/`metrics`. Found and fixed during M22 itself; pinned here so
+#    the *next* paragraph property cannot be lost the same way. The same rebuild shape had already
+#    been found in `setTextAlign` and `applyInlineFormat`.
+#  * `setTextAlign` and `applyInlineFormat` rebuilding the block field by field again -- the two
+#    defects the M22 browser suite caught, kept as mutants because they are the most likely shape of
+#    the next one.
+#  * A patch treating an *absent* key as "clear", which destroys the metrics it did not mention.
+#  * Logical properties written as physical ones. `margin-inline-start` -> `margin-left` renders
+#    identically in LTR, so only the RTL layout measurement can see it, which is why those two aim
+#    at `typography-paragraph.spec.ts` and not at the unit suite.
+#  * The two no-op guards removed, which do not crash -- they record an undo step that does nothing.
+#
+# The `metricState` pair is aimed at the field *label*, not the value: collapsing "mixed" back into
+# `undefined` makes an inspector show "No first-line indent" over three paragraphs where two have
+# one, which is false rather than merely unhelpful.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'an absent paragraph direction reads as ltr instead of as nothing' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("if (attribute === 'auto') return undefined;", "if (attribute === 'auto') return 'ltr';") } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'the renderer writes ltr for a paragraph that never declared a direction' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("paragraph.setAttribute('dir', block.dir ?? 'auto');", "paragraph.setAttribute('dir', block.dir ?? 'ltr');") } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'normalizeRichText drops the paragraph direction' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace("...(block.dir === undefined ? {} : { dir: block.dir }),", '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'normalizeRichText drops the paragraph metrics' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace("...(block.metrics === undefined ? {} : { metrics: { ...block.metrics } }),", '') } `
+  'src/model/rich-text.test.ts'
+
+Add-Mutation 'paragraph equality ignores the metrics, so an indent edit is a no-op with no history' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (!paragraphMetricsEqual(left.metrics, right.metrics)) return false;', '') } `
+  'tests/model/paragraph-commands.test.ts'
+
+Add-Mutation 'setTextAlign rebuilds the paragraph field by field, dropping direction and metrics' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace("...block," + "`n" + "              ...(align === null ? {} : { align }),", "kind: block.kind," + "`n" + "              ...(align === null ? {} : { align })," + "`n" + "              runs: block.runs,") } `
+  'tests/model/paragraph-commands.test.ts'
+
+Add-Mutation 'a metrics patch treats an absent key as clear, destroying the metrics it did not mention' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace('if (!(key in patch)) continue;', '') } `
+  'tests/model/paragraph-commands.test.ts'
+
+Add-Mutation 'setting the direction a paragraph already has is no longer a no-op' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace("if (node.text.blocks.every((block) => (block.dir ?? 'auto') === (dir ?? 'auto'))) return node;", '') } `
+  'tests/model/paragraph-commands.test.ts'
+
+Add-Mutation 'setParagraphMetrics has no no-op guard, so every keystroke records a dead undo step' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace('if (node.text.blocks.every((block) => paragraphMetricsEqual(block.metrics, merged(block)))) {', 'if (false) {') } `
+  'tests/model/paragraph-commands.test.ts'
+
+Add-Mutation 'the walker reads the start margin as a left margin, which happens to be right in LTR' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("marginStart: 'margin-inline-start',", "marginStart: 'margin-left',") } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'the first-line indent is written as a left indent, which happens to be right in LTR' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("setStyle(paragraph, 'text-indent', optionalLength(metrics?.textIndent));", "paragraph.style.marginLeft = optionalLength(metrics?.textIndent);") } `
+  'tests/editor/typography-paragraph.spec.ts'
+
+Add-Mutation 'the walker never reads the indents back, so the first keystroke discards them' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace('metrics = readMetrics(element) ?? metrics;', '') } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'the walker never reads the direction back, so the first keystroke discards it' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace('dir = readDirection(element) ?? dir;', '') } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'superscript renders as an ordinary wrapper, so it reads back as plain text' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("{ flag: 'super', tag: 'sup' },", "{ flag: 'super', tag: 'b' },") } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'superscript and subscript collapse into one flag, which is the second spelling problem' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace("next = { ...extend(), ...(tag === 'SUP' ? { super: true } : { sub: true }) };", "next = { ...extend(), super: true };") } `
+  'src/render/rich-text-html.paragraph.test.ts'
+
+Add-Mutation 'the format flag list omits super and subscript, so they are dropped on every save' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace("for (const flag of CHAR_FLAGS) {", "for (const flag of ['bold', 'italic', 'underline', 'strike'] as const) {") } `
+  'tests/persist/version4-migration.test.ts'
+
+Add-Mutation 'the signed/unsigned split between textIndent and the margins is inverted' `
+  'src\persist\deserialize.ts' `
+  { param($t) $t.Replace('key === ''textIndent''', 'key !== ''textIndent''') } `
+  'tests/persist/version4-migration.test.ts'
+
+Add-Mutation 'a version-3 paragraph carrying `dir` is accepted, so a v3 build would re-save without it' `
+  'src\persist\format.ts' `
+  { param($t) $t.Replace('return version >= 4 ? PARAGRAPH_KEYS : LEGACY_PARAGRAPH_KEYS;', 'return PARAGRAPH_KEYS;') } `
+  'tests/persist/version4-migration.test.ts'
+
+Add-Mutation 'the inspector reports a mixed indent as "no first-line indent"' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace("if (seen.size > 1) return { value: undefined, mixed: true };", "if (seen.size > 1) return { value: undefined, mixed: false };") } `
+  'tests/editor/typography-paragraph.spec.ts'
+
+Add-Mutation 'the clear-indents button is disabled whenever the fields read as mixed' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace('if (anyMetricIn(editor.doc, ids, field.key)) anyMetric = true;', '') } `
+  'tests/editor/typography-paragraph.spec.ts'
+
+Add-Mutation 'the super and subscript chords are swallowed inside a text session' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("const inside = characterFormatFlag(event);", 'const inside = null as ReturnType<typeof characterFormatFlag>;') } `
+  'tests/editor/typography-paragraph.spec.ts'
+
+Add-Mutation 'a paragraph property change is routed through the model even inside a session, double-applying it' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace('if ((event.ctrlKey || event.metaKey) && inside !== null && !BROWSER_OWNS[inside]) {', 'if (false) {') } `
+  'tests/editor/typography-paragraph.spec.ts'

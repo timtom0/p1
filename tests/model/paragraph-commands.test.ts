@@ -101,7 +101,34 @@ describe('setTextDirection', () => {
 
   it('has a history label', () => {
     expect(describeCommand({ type: 'setTextDirection', nodeId: 'n', dir: 'rtl' })).toBe('Text direction');
+
   });
+
+  it('realigning keeps the direction and the metrics every paragraph already had', () => {
+      // A real M22 defect, and one whose *unit* coverage was missing even though the browser suite
+      // caught it. `setTextAlign` rebuilt each paragraph field by field -- `kind`, `align`, `runs` --
+      // which was complete when those were the only fields. Adding `dir` and `metrics` without
+      // touching it meant that centring a right-to-left paragraph silently discarded its direction and
+      // every indent, with no error and nothing in the UI to show for it.
+      //
+      // `normalizeRichText` had the identical shape of bug, and the three sites are now pinned by
+      // three tests, because a fourth paragraph property is exactly what would find it again.
+      const { doc, frameId } = docWith([
+        { ...plain, dir: 'rtl', metrics: { textIndent: 24, marginBefore: 6 } },
+        { ...plain, dir: 'ltr', metrics: { marginAfter: 2 } },
+        plain,
+      ]);
+      const after = apply(doc, { type: 'setTextAlign', nodeId: frameId, align: 'center' });
+      const blocks = blocksOf(after, frameId);
+  
+      expect(blocks.map((block) => block.align)).toEqual(['center', 'center', 'center']);
+      expect(blocks[0]?.dir, 'realigning discarded the direction').toBe('rtl');
+      expect(blocks[0]?.metrics).toEqual({ textIndent: 24, marginBefore: 6 });
+      expect(blocks[1]?.dir).toBe('ltr');
+      expect(blocks[1]?.metrics).toEqual({ marginAfter: 2 });
+      expect(blocks[2]?.dir, 'an unset direction became a value').toBeUndefined();
+      expect(blocks[2]?.metrics).toBeUndefined();
+    });
 });
 
 describe('setParagraphMetrics', () => {
