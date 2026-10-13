@@ -266,7 +266,7 @@ export interface CreateDocumentOptions extends Partial<Omit<Document, 'id' | 'pa
  * while every previous version was a strict subset of the current one, and records why that stopped
  * being so.
  */
-export const CURRENT_FORMAT_VERSION = 3;
+export const CURRENT_FORMAT_VERSION = 4;
 
 export function createDocument(init: CreateDocumentOptions = {}): Document {
   const { pageSize, fixedSize, resizeBehaviour, pageSetup, ...rest } = init;

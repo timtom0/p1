@@ -53,7 +53,7 @@ import {
   DocumentParseError,
 } from '../../src/persist/format';
 
-const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample-v3.p1doc', import.meta.url));
+const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample-v4.p1doc', import.meta.url));
 const HANDWRITTEN_PATH = fileURLToPath(new URL('../golden/handwritten.p1doc', import.meta.url));
 const FIXTURE_TEXT = readFileSync(FIXTURE_PATH, 'utf8');
 

@@ -163,6 +163,19 @@ export interface CharFormat {
   italic?: true;
   underline?: true;
   strike?: true;
+  /**
+   * Superscript and subscript (M22).
+   *
+   * Added as two more true-only flags rather than as a baseline offset, because a baseline shift
+   * would be a *number* and the type this whole model rests on is "`true` or absent" -- one encoding
+   * of "not bold", so a document can never hold two spellings of the same visual text. Keeping that
+   * property means no `false` and no arbitrary sub/superscript percentage ever enters the format.
+   *
+   * Mapped to `<sup>`/`<sub>`, which are what the browser itself produces and consumes, so the
+   * round-trip through the editing surface needs no special case.
+   */
+  super?: true;
+  sub?: true;
 }
 
 /**
@@ -189,6 +202,52 @@ export interface InlineRun {
 export type ParagraphAlign = 'left' | 'center' | 'right' | 'justify';
 
 /**
+ * A paragraph's base writing direction (M22).
+ *
+ * `auto` is the default and is what every pre-M22 document means: the browser decides from the
+ * content. M21 established `dir="auto"` on every rendered paragraph, which fixed the *neutrals* --
+ * a trailing full stop after Arabic landing with its sentence instead of at the wrong edge -- but
+ * left an author no way to state a direction. A paragraph opening with a neutral has no strong
+ * character for `auto` to go on, and mixed-direction publishing cannot be expressed at all.
+ *
+ * **`ltr` and `rtl` are overrides, not a second source of truth for alignment.** They change the
+ * base direction the bidi algorithm resolves neutrals against; they do not reorder characters, and
+ * `text-align` remains an independent property. That separation is deliberate: "this paragraph is
+ * right-to-left" and "this paragraph is centred" are different questions and a user may want both.
+ */
+export type ParagraphDirection = 'auto' | 'ltr' | 'rtl';
+
+/**
+ * Paragraph-level metrics that are not frame typography.
+ *
+ * All lengths are **document px**, and all are applied through CSS *logical* properties
+ * (`text-indent`, `margin-inline-start`, `margin-block-start`), so the start edge follows the
+ * paragraph's own direction with no RTL/LTR branching anywhere in this codebase. A first-line
+ * indent on an Arabic paragraph indents from the right, which is what an author means by it, and it
+ * falls out of the mapping rather than out of a conditional.
+ *
+ * Deliberately absent, because honouring them needs pagination the fixed-frame model has not got:
+ * `keepWithNext` and `keepLinesTogether` are recorded as an M23+ dependency in ARCHITECTURE rather
+ * than stored and quietly ignored. Tab stops are absent for a different reason: their representation
+ * and their editing affordance together were judged disproportionate in the M22 audit.
+ *
+ * Absent means "unset" and is emitted as nothing, exactly as in `TextStyle` -- so a paragraph that
+ * never had an indent costs no bytes and inherits from the frame and the stylesheet.
+ */
+export interface ParagraphMetrics {
+  /** Distance the first line is indented by, from the paragraph's start edge. */
+  textIndent?: number;
+  /** Inset from the start edge (right for `ltr`, left for `rtl`). */
+  marginStart?: number;
+  /** Inset from the end edge. */
+  marginEnd?: number;
+  /** Space above the paragraph. Does not collapse against the frame or its neighbours. */
+  marginBefore?: number;
+  /** Space below the paragraph. */
+  marginAfter?: number;
+}
+
+/**
  * One paragraph: one `<p>` in the DOM, one entry in `RichText.blocks`.
  *
  * `kind` is a discriminator even though only `paragraph` exists. §1.5's publishing
@@ -200,6 +259,10 @@ export type ParagraphAlign = 'left' | 'center' | 'right' | 'justify';
 export interface ParagraphBlock {
   kind: 'paragraph';
   align?: ParagraphAlign;
+  /** Base writing direction. Absent means `auto`, which is every pre-M22 document. */
+  dir?: ParagraphDirection;
+  /** Indents and spacing. Absent keys mean "unset", not zero. */
+  metrics?: ParagraphMetrics;
   runs: InlineRun[];
 }
 

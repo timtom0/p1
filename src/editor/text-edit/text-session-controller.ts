@@ -87,6 +87,8 @@ const COMMAND_FOR_FLAG: Record<CharFlag, string> = {
   italic: 'italic',
   underline: 'underline',
   strike: 'strikeThrough',
+  super: 'superscript',
+  sub: 'subscript',
 };
 
 export class TextSessionController {

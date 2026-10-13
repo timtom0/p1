@@ -235,7 +235,37 @@ export const PAINT_KEYS = ['type', 'color'] as const;
 
 export const RICH_TEXT_KEYS = ['blocks'] as const;
 
-export const PARAGRAPH_KEYS = ['kind', 'align', 'runs'] as const;
+/** Versions 1-3: alignment and runs only. No authorable direction, no paragraph metrics. */
+export const LEGACY_PARAGRAPH_KEYS = ['kind', 'align', 'runs'] as const;
+
+/** Version 4 and later: adds `dir` and `metrics`. */
+export const PARAGRAPH_KEYS = ['kind', 'align', 'dir', 'metrics', 'runs'] as const;
+
+/**
+ * Paragraph keys legal for `version`.
+ *
+ * The paragraph gained keys in v4, so a v3 file carrying `dir` is a document from the future and
+ * must be refused by name rather than silently accepted -- the same rule `documentKeysFor` applies
+ * at the document level, and for the same reason. The alternative, accepting `dir` everywhere, would
+ * let an older build read a document whose paragraphs it would then re-save without the field: a
+ * quiet loss of authored state, which is the failure this format's "refuse, do not drop" policy
+ * exists to prevent.
+ */
+export function paragraphKeysFor(version: number): readonly string[] {
+  return version >= 4 ? PARAGRAPH_KEYS : LEGACY_PARAGRAPH_KEYS;
+}
+
+/** The three base directions a paragraph may declare. */
+export const PARAGRAPH_DIRECTIONS = ['auto', 'ltr', 'rtl'] as const;
+
+/** Paragraph indent and spacing keys. */
+export const PARAGRAPH_METRIC_KEYS = [
+  'marginBefore',
+  'marginAfter',
+  'marginStart',
+  'marginEnd',
+  'textIndent',
+] as const;
 
 export const RUN_KEYS = ['text', 'format'] as const;
 
@@ -270,7 +300,7 @@ export const SHARED_NODE_KEYS = [
 // ---------------------------------------------------------------------------
 
 /** Flag order is also the serialization order, so two equal runs always emit equally. */
-export const CHAR_FLAGS = ['bold', 'italic', 'underline', 'strike'] as const;
+export const CHAR_FLAGS = ['bold', 'italic', 'underline', 'strike', 'super', 'sub'] as const;
 
 export const BLEND_MODES = [
   'normal',

@@ -49,6 +49,8 @@ import type {
   PageSize,
   Paint,
   ParagraphAlign,
+  ParagraphDirection,
+  ParagraphMetrics,
   ParagraphBlock,
   RichText,
   ShapeGeometry,
@@ -76,7 +78,9 @@ import {
   PAGE_SIZE_KEYS,
   PAINT_KEYS,
   PARAGRAPH_ALIGNS,
-  PARAGRAPH_KEYS,
+  PARAGRAPH_DIRECTIONS,
+  paragraphKeysFor,
+  PARAGRAPH_METRIC_KEYS,
   RICH_TEXT_KEYS,
   RUN_KEYS,
   SHARED_NODE_KEYS,
@@ -467,14 +471,14 @@ function parsePage(input: unknown, path: string, version: number, inheritedSize?
         ? parsePageSize(record['size'], `${path}.size`)
         : clonePageSize(inheritedSize ?? parsePageSize(record['size'], `${path}.size`)),
     background: parsePaint(record['background'], `${path}.background`),
-    objects: objects.map((node, index) => parseNode(node, `${path}.objects[${index}]`)),
+      objects: objects.map((node, index) => parseNode(node, `${path}.objects[${index}]`, version)),
   };
 }
 
 /** Everything a node carries whatever its type, minus the type-specific tail. */
 type SharedNode = Omit<ShapeNode, 'type' | 'shape' | 'fill' | 'stroke'>;
 
-function parseNode(input: unknown, path: string): Node {
+function parseNode(input: unknown, path: string, version: number): Node {
   const record = expectRecord(input, path);
   const type = expectString(record['type'], `${path}.type`);
 
@@ -504,7 +508,7 @@ function parseNode(input: unknown, path: string): Node {
       const node: TextFrameNode = {
         type: 'textFrame',
         ...parseSharedNode(record, path),
-        text: parseRichText(record['text'], `${path}.text`),
+        text: parseRichText(record['text'], `${path}.text`, version),
       };
       if (record['style'] !== undefined) {
         node.style = parseTextStyle(record['style'], `${path}.style`);
@@ -540,7 +544,7 @@ function parseNode(input: unknown, path: string): Node {
         type: 'group',
         ...parseSharedNode(record, path),
         children: expectArray(record['children'], `${path}.children`).map((child, index) =>
-          parseNode(child, `${path}.children[${index}]`),
+          parseNode(child, `${path}.children[${index}]`, version),
         ),
       };
       if (record['extensions'] !== undefined) {
@@ -650,7 +654,7 @@ function parseStroke(input: unknown, path: string): Stroke {
   };
 }
 
-function parseRichText(input: unknown, path: string): RichText {
+function parseRichText(input: unknown, path: string, version: number): RichText {
   const record = expectRecord(input, path);
   expectOnlyKeys(record, path, RICH_TEXT_KEYS);
   const blocks = expectArray(record['blocks'], `${path}.blocks`);
@@ -659,19 +663,23 @@ function parseRichText(input: unknown, path: string): RichText {
     // to live and `Enter` needs somewhere to go (ADR 0003).
     throw new DocumentParseError(`${path}.blocks`, 'a frame has at least one block');
   }
-  const parsed = blocks.map((block, index) => parseParagraph(block, `${path}.blocks[${index}]`));
+  const parsed = blocks.map((block, index) =>
+    parseParagraph(block, `${path}.blocks[${index}]`, version),
+  );
   // Re-applied on load, so a hand-edited file with adjacent equal-format runs comes back
   // canonical instead of staying non-canonical forever (ADR 0003).
   return normalizeRichText({ blocks: parsed });
 }
 
-function parseParagraph(input: unknown, path: string): ParagraphBlock {
+function parseParagraph(input: unknown, path: string, version: number): ParagraphBlock {
   const record = expectRecord(input, path);
   const kind = expectString(record['kind'], `${path}.kind`);
   if (kind !== 'paragraph') {
     throw new DocumentParseError(`${path}.kind`, `unknown block kind "${kind}"`);
   }
-  expectOnlyKeys(record, path, PARAGRAPH_KEYS);
+  // Version first, so a v3 file carrying `dir` is refused by name as a future document rather than
+  // accepted by a build that would silently drop the field on the next save.
+  expectOnlyKeys(record, path, paragraphKeysFor(version));
   const runs = expectArray(record['runs'], `${path}.runs`);
   const block: ParagraphBlock = {
     kind: 'paragraph',
@@ -680,7 +688,30 @@ function parseParagraph(input: unknown, path: string): ParagraphBlock {
   if (record['align'] !== undefined) {
     block.align = expectEnum(record['align'], `${path}.align`, PARAGRAPH_ALIGNS) as ParagraphAlign;
   }
+  // M22. Both are optional and both default by *absence*, which is what makes the v3 migration
+  // trivial: a v3 document simply has neither, and `auto` plus no metrics is exactly what it meant
+  // when it was written. Nothing is rewritten, so re-saving a v3 file as v4 adds nothing it did not
+  // already say.
+  if (record['dir'] !== undefined) {
+    block.dir = expectEnum(record['dir'], `${path}.dir`, PARAGRAPH_DIRECTIONS) as ParagraphDirection;
+  }
+  if (record['metrics'] !== undefined) {
+    block.metrics = parseParagraphMetrics(record['metrics'], `${path}.metrics`);
+  }
   return block;
+}
+
+/** Every metric is a length, so every one is validated as a finite non-negative document px. */
+function parseParagraphMetrics(input: unknown, path: string): ParagraphMetrics {
+  const record = expectRecord(input, path);
+  expectOnlyKeys(record, path, PARAGRAPH_METRIC_KEYS);
+  const metrics: ParagraphMetrics = {};
+  for (const key of PARAGRAPH_METRIC_KEYS) {
+    const value = record[key];
+    if (value === undefined) continue;
+    metrics[key] = expectNonNegative(value, `${path}.${key}`);
+  }
+  return metrics;
 }
 
 function parseRun(input: unknown, path: string): ParagraphBlock['runs'][number] {

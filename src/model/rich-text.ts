@@ -25,12 +25,28 @@ import type {
   InlineRun,
   ParagraphAlign,
   ParagraphBlock,
+  ParagraphDirection,
+  ParagraphMetrics,
   RichText,
   TextBlock,
 } from './types';
 
-/** The four character-formatting flags, in canonical nesting order. */
-export const CHAR_FLAGS = ['bold', 'italic', 'underline', 'strike'] as const;
+/** The six character-formatting flags, in canonical nesting order. */
+export const CHAR_FLAGS = ['bold', 'italic', 'underline', 'strike', 'super', 'sub'] as const;
+
+/**
+ * Paragraph indent and spacing keys, in the order they are applied.
+ *
+ * Declared here rather than in the persist layer because `normalizeRichText`, `paragraphMetricsEqual`
+ * and the renderer all need to agree on the set, and three copies of a list is two too many.
+ */
+export const PARAGRAPH_METRIC_KEYS = [
+  'marginBefore',
+  'marginAfter',
+  'marginStart',
+  'marginEnd',
+  'textIndent',
+] as const;
 
 export type CharFlag = (typeof CHAR_FLAGS)[number];
 
@@ -54,6 +70,19 @@ export function formatsEqual(a: CharFormat | undefined, b: CharFormat | undefine
 }
 
 /**
+ * Total equality on paragraph metrics, treating absent and absent alike.
+ *
+ * An all-undefined metrics object and no metrics object are the same paragraph, which is the same
+ * rule `formatsEqual` applies to `CharFormat` and for the same reason: one encoding of "unset".
+ */
+export function paragraphMetricsEqual(
+  a: ParagraphMetrics | undefined,
+  b: ParagraphMetrics | undefined,
+): boolean {
+  return PARAGRAPH_METRIC_KEYS.every((key) => (a?.[key] ?? undefined) === (b?.[key] ?? undefined));
+}
+
+/**
  * Structural equality on `RichText`.
  *
  * Total, and independent of canonical form: two non-canonical but equal-valued
@@ -70,6 +99,11 @@ export function richTextEqual(a: RichText, b: RichText): boolean {
     if (left === undefined || right === undefined) return false;
     if (left.kind !== right.kind) return false;
     if (left.align !== right.align) return false;
+    // M22: `dir` and `metrics` participate in equality. A command that changed an indent is a
+    // change, and `richTextEqual` is what decides whether a command is a no-op at all -- so leaving
+    // these out would make a paragraph-property edit record no history and be undone by nothing.
+    if (left.dir !== right.dir) return false;
+    if (!paragraphMetricsEqual(left.metrics, right.metrics)) return false;
     if (left.runs.length !== right.runs.length) return false;
 
     for (let run = 0; run < left.runs.length; run += 1) {
@@ -119,6 +153,11 @@ export function normalizeRichText(text: RichText): RichText {
     return {
       kind: block.kind,
       ...(block.align === undefined ? {} : { align: block.align }),
+      // Carried through field by field like `align`, because this function *rebuilds* the block
+      // rather than spreading it. M22 added `dir` and `metrics`, and the day this is written by
+      // spreading `block` instead is the day a property is silently dropped on every edit.
+      ...(block.dir === undefined ? {} : { dir: block.dir }),
+      ...(block.metrics === undefined ? {} : { metrics: { ...block.metrics } }),
       runs,
     };
   });
@@ -161,10 +200,13 @@ export function run(text: string, flags?: readonly CharFlag[]): InlineRun {
 export function paragraph(
   runs: readonly InlineRun[],
   align?: ParagraphAlign,
+  extra?: { dir?: ParagraphDirection; metrics?: ParagraphMetrics },
 ): ParagraphBlock {
   return {
     kind: 'paragraph',
     ...(align === undefined ? {} : { align }),
+    ...(extra?.dir === undefined ? {} : { dir: extra.dir }),
+    ...(extra?.metrics === undefined ? {} : { metrics: { ...extra.metrics } }),
     runs: [...runs],
   };
 }

@@ -146,12 +146,12 @@ describe('migrating a version-1/2 document', () => {
 
   it('re-stamps the version, so the migration runs once', () => {
     expect(parse(legacyDoc()).formatVersion).toBe(CURRENT_FORMAT_VERSION);
-    expect(CURRENT_FORMAT_VERSION).toBe(3);
+    expect(CURRENT_FORMAT_VERSION).toBe(4);
   });
 
   it('writes a version-3 file whose pages carry their own size', () => {
     const saved = JSON.parse(serializeToString(parse(legacyDoc()))) as Record<string, unknown>;
-    expect(saved['formatVersion']).toBe(3);
+    expect(saved['formatVersion']).toBe(CURRENT_FORMAT_VERSION);
     expect(saved['pageSetup']).toBeDefined();
     expect(saved['pageSize']).toBeUndefined();
     const pages = saved['pages'] as Array<Record<string, unknown>>;

@@ -288,7 +288,14 @@ describe('the version', () => {
     // version check on that build's side, which this build can only mirror in the other direction.
     // So the test here is the half that is observable: the group survives the re-stamp, rather than
     // being dropped because the stamp looked old.
-    const withGroup = legacyDocument(CURRENT_FORMAT_VERSION - 1);
+    //
+    // Stamped **2**, and previously `CURRENT_FORMAT_VERSION - 1`. That worked only while "the
+    // previous version" and "the last version whose *shape* this builder produces" were the same
+    // number. M22's bump separated them: `legacyDocument` writes `pageSize` and no `pageSetup`,
+    // which is a version-2 shape, so pairing it with a version-3 stamp produced a document that is
+    // correctly refused -- for being stamped newer than its shape, which is the opposite of what
+    // this test is about.
+    const withGroup = legacyDocument(2);
     const pages = withGroup['pages'] as { objects: Record<string, unknown>[] }[];
     const page = pages[0];
     if (page === undefined) throw new Error('the builder produced no pages');

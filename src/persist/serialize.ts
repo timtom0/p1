@@ -45,6 +45,7 @@ import type {
   PageSize,
   Paint,
   ParagraphBlock,
+  ParagraphMetrics,
   RichText,
   ShapeGeometry,
   ShapeNode,
@@ -54,7 +55,12 @@ import type {
   Transform2D,
   ImageNode,
 } from '../model/types';
-import { CHAR_FLAGS, CURRENT_FORMAT_VERSION, DOCUMENT_FORMAT } from './format';
+import {
+  CHAR_FLAGS,
+  CURRENT_FORMAT_VERSION,
+  DOCUMENT_FORMAT,
+  PARAGRAPH_METRIC_KEYS,
+} from './format';
 import type { PersistedDocument } from './format';
 
 /**
@@ -287,6 +293,21 @@ function canonicalRichText(text: RichText): RichText {
         }),
       };
       if (block.align !== undefined) out.align = block.align;
+      // M22. Key order fixed from the shared list, for the same reason the flag order above is:
+      // two equal paragraphs must serialise to the same bytes, or every save becomes a diff.
+      //
+      // Written only when present. An absent key means "unset", which for `dir` is `auto` -- the
+      // value a pre-M22 document meant and the value a v4 document with no explicit direction must
+      // round-trip to without gaining a field it did not have.
+      if (block.dir !== undefined) out.dir = block.dir;
+      if (block.metrics !== undefined) {
+        const metrics: ParagraphMetrics = {};
+        for (const key of PARAGRAPH_METRIC_KEYS) {
+          const value = block.metrics[key];
+          if (value !== undefined) metrics[key] = value;
+        }
+        out.metrics = metrics;
+      }
       return out;
     }),
   };
