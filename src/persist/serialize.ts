@@ -35,6 +35,7 @@
  */
 
 import type {
+  StyleDefinition,
   AssetId,
   AssetRecord,
   CharFormat,
@@ -46,6 +47,7 @@ import type {
   Paint,
   ParagraphBlock,
   ParagraphMetrics,
+  ParagraphStyleProps,
   RichText,
   ShapeGeometry,
   ShapeNode,
@@ -84,6 +86,11 @@ export function serialize(doc: Document): PersistedDocument {
       // own declaration order in `page-setup.ts`.
       defaultSize: canonicalPageSize(doc.pageSetup.defaultSize),
     },
+    // M23. Emitted in document order, and **always** -- an empty table is written as `[]` rather
+    // than omitted, so there is exactly one shape a v5 file can have and "no styles" is a value
+    // rather than an absence. Canonicalising means a document with two equal styles written in
+    // different orders produces identical bytes, which is the same rule the run flags follow.
+    styles: doc.styles.map(canonicalStyle),
     assets: canonicalAssets(doc.assets),
     pages: doc.pages.map(canonicalPage),
   };
@@ -289,6 +296,9 @@ function canonicalRichText(text: RichText): RichText {
             }
             copy.format = format;
           }
+          // M23. Written beside `format`, never inside it: the reference is not a flag, and folding
+          // it in would make "inherit bold" and "set bold directly" the same bytes.
+          if (run.styleId !== undefined) copy.styleId = run.styleId;
           return copy;
         }),
       };
@@ -308,10 +318,55 @@ function canonicalRichText(text: RichText): RichText {
         }
         out.metrics = metrics;
       }
+      // M23, on the same rule as `dir`: written only when present, so an unstyled paragraph
+      // round-trips without gaining a field.
+      if (block.styleId !== undefined) out.styleId = block.styleId;
       return out;
     }),
   };
 }
+
+/**
+ * M23: one style definition in canonical key order.
+ *
+ * Returns the input by identity when it is already canonical, so an unchanged document produces
+ * byte-identical output and the save path has nothing to rewrite. The `kind`-keyed spread is what
+ * makes that possible: the payload key's position depends on the category, and a document whose
+ * styles were built in a different order must still serialise identically.
+ */
+function canonicalStyle(style: StyleDefinition): StyleDefinition {
+  if (style.kind === 'character') {
+    const character: CharFormat = {};
+    for (const flag of CHAR_FLAGS) {
+      if (style.character[flag] === true) character[flag] = true;
+    }
+    const out = { id: style.id, name: style.name, kind: style.kind, character };
+    return sameCharFormat(character, style.character) ? style : out;
+  }
+
+  if (style.kind === 'paragraph') {
+    const paragraph: ParagraphStyleProps = {};
+    if (style.paragraph.align !== undefined) paragraph.align = style.paragraph.align;
+    if (style.paragraph.dir !== undefined) paragraph.dir = style.paragraph.dir;
+    if (style.paragraph.metrics !== undefined) {
+      const metrics: ParagraphMetrics = {};
+      for (const key of PARAGRAPH_METRIC_KEYS) {
+        const value = style.paragraph.metrics[key];
+        if (value !== undefined) metrics[key] = value;
+      }
+      paragraph.metrics = metrics;
+    }
+    const out = { id: style.id, name: style.name, kind: style.kind, paragraph };
+    return JSON.stringify(out) === JSON.stringify(style) ? style : out;
+  }
+
+  const frame = canonicalTextStyle(style.frame);
+  const out = { id: style.id, name: style.name, kind: style.kind, frame };
+  return JSON.stringify(out) === JSON.stringify(style) ? style : out;
+}
+
+const sameCharFormat = (a: CharFormat, b: CharFormat): boolean =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 function canonicalTextStyle(style: TextStyle): TextStyle {
   const out: TextStyle = {};

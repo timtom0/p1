@@ -94,6 +94,7 @@ const docOf = (objects: unknown[], pageWidth = 500, pageHeight = 400): Document 
     id: 'd',
     name: 'D',
     pageSetup: createPageSetup(),
+    styles: [],
     assets: {},
     pages: [
       {

@@ -55,6 +55,12 @@ import type { PersistedDocument } from '../../src/persist/format';
 function legacyDocument(formatVersion: number = MINIMUM_FORMAT_VERSION): Record<string, unknown> {
   const current = validDocument();
   delete current['pageSetup'];
+  // M23. A legacy document must not carry `styles`, and deleting it here is the property under
+  // test rather than a detail of the builder: `documentKeysFor` refuses a document stamped as
+  // version 1 or 2 that *does* carry it, because that combination is a future field on an old
+  // stamp. Leaving it in place would make every legacy fixture here fail for the wrong reason and
+  // hide the refusal it is meant to demonstrate.
+  delete current['styles'];
   current['formatVersion'] = formatVersion;
   current['pageSize'] = { width: 210, height: 297, unit: 'mm', orientation: 'portrait' };
   const pages = current['pages'] as Record<string, unknown>[];
@@ -72,6 +78,8 @@ function validDocument(): Record<string, unknown> {
       defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },
+    // M23: "no styles" is an empty table, not an absent field.
+    styles: [],
     assets: {
       asset_1: {
         kind: 'image',

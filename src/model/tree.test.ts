@@ -135,6 +135,8 @@ function doc(id: string, pages: Page[]): Document {
     id,
     name: id,
     pageSetup: createPageSetup({ defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' } }),
+    // M23: a document with no styles, spelled the way the model spells it.
+    styles: [],
     assets: {},
     pages,
   };

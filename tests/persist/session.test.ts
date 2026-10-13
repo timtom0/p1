@@ -149,6 +149,8 @@ function persisted(overrides: Record<string, unknown> = {}): string {
       defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },
+    // M23: every document carries a style table, possibly empty.
+    styles: [],
     assets: {},
     pages: [
       {

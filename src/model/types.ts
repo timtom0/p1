@@ -196,6 +196,18 @@ export interface InlineRun {
   text: string;
   /** Omitted entirely when unformatted, not `{}`. */
   format?: CharFormat;
+  /**
+   * A character style this run references (M23).
+   *
+   * Stored **beside** `format`, never folded into it. `format` is what this run overrides
+   * directly; `styleId` is where it inherits the rest. Folding them would make the two
+   * indistinguishable, and "clear my override, get the style's value back" would stop
+   * being expressible.
+   *
+   * Part of the run's *identity* for the purpose of merging: two runs with equal `format`
+   * and different styles are different formatting and must not merge.
+   */
+  styleId?: string;
 }
 
 /** Paragraph alignment. Omitted means "the CSS default", which is also `left`. */
@@ -271,6 +283,15 @@ export interface ParagraphBlock {
   dir?: ParagraphDirection;
   /** Indents and spacing. Absent keys mean "unset", not zero. */
   metrics?: ParagraphMetrics;
+  /**
+   * A paragraph style this paragraph references (M23).
+   *
+   * Alongside `align`, `dir` and `metrics` rather than inside them, for the reason `InlineRun.styleId`
+   * gives: those three are what this paragraph overrides directly, and this is where it inherits the
+   * rest. Each resolves independently, so a paragraph may override its indent and still take its
+   * direction from the style.
+   */
+  styleId?: string;
   runs: InlineRun[];
 }
 
@@ -314,6 +335,79 @@ export interface TextStyle {
 }
 
 /**
+ * A reusable typography style (M23).
+ *
+ * ## Why a discriminated union and not one bag of properties
+ *
+ * A single `{ align?, fontSize?, bold?, ... }` would be smaller to write and is the shape every
+ * word processor used to have. It is wrong here for two reasons that are not stylistic. A character
+ * style carrying `align` has no meaning — there is nothing to align — so the type would permit
+ * documents that cannot be honoured, and the *renderer* would have to decide what to do with them.
+ * And the reference site determines the category: `InlineRun.styleId` may only ever name a
+ * `character` style, `ParagraphBlock.styleId` a `paragraph` one, `TextFrameNode.styleId` a `frame`
+ * one, which the union makes a typecheck rather than a runtime check.
+ *
+ * ## What a style is, and is not
+ *
+ * A style is a **shared source of inherited values**, not a snapshot. Editing one changes every
+ * object that references it, at every site, with no reapplication — that is the entire point, and it
+ * is why nothing in the render or save path may copy a resolved value back onto the object. The two
+ * operations that *do* materialize are `unlinkStyle` and deletion-with-unlink, both explicit user
+ * commands, and both undoable.
+ *
+ * ## Why definitions live in the document
+ *
+ * They are part of history. A separate side store would mean undo restores the objects but not the
+ * definitions they resolve against, which is the same reason assets are in the model (ADR 0014).
+ * Document-local by construction: there is no global registry, no cross-document library, and no
+ * external dependency.
+ *
+ * **No parent styles.** A style resolves to its own properties and to the application's defaults.
+ * That is the whole of the resolution rule, and adding a hierarchy later means adding a term to it
+ * rather than replacing it.
+ */
+export interface StyleIdentity {
+  /**
+   * Stable identity. **References are ids, never names** — see `StyleDefinition`.
+   *
+   * Renaming changes `name` and nothing else, which is why a rename cannot break a reference.
+   */
+  id: string;
+  /** Author-facing label. Unique within a category, not enforced by the format. */
+  name: string;
+}
+
+/** Character formatting, reusable across documents' runs. `format` only, no geometry. */
+export interface CharacterStyleDefinition extends StyleIdentity {
+  kind: 'character';
+  character: CharFormat;
+}
+
+/**
+ * Paragraph formatting a paragraph style can supply.
+ *
+ * `Pick` rather than a restatement, so a sixth paragraph property is added in one place. Alignment,
+ * direction and metrics are the whole set — which is exactly what §2 of M23 asks for, and no more.
+ */
+export type ParagraphStyleProps = Pick<ParagraphBlock, 'align' | 'dir' | 'metrics'>;
+
+export interface ParagraphStyleDefinition extends StyleIdentity {
+  kind: 'paragraph';
+  paragraph: ParagraphStyleProps;
+}
+
+/** Frame typography only. Geometry, padding and page properties are deliberately not here. */
+export interface FrameStyleDefinition extends StyleIdentity {
+  kind: 'frame';
+  frame: TextStyle;
+}
+
+export type StyleDefinition =
+  | CharacterStyleDefinition
+  | ParagraphStyleDefinition
+  | FrameStyleDefinition;
+
+/**
  * A text frame.
  *
  * Note what is absent versus §1.5's sketch, and why — each is a decision recorded in
@@ -332,6 +426,14 @@ export interface TextFrameNode extends BaseNode {
   text: RichText;
   /** Omitted means the document default, which CSS supplies. */
   style?: TextStyle;
+  /**
+   * A frame style this node references (M23).
+   *
+   * Alongside `style`, for the reason `InlineRun.styleId` gives. `style` is what this frame
+   * overrides directly — every property in it is inherited *from the style* rather than authored
+   * here — and this is the reference those properties come from.
+   */
+  styleId?: string;
 }
 
 /**
@@ -528,6 +630,18 @@ export interface Document {
    * authored, undoable, and must survive a round trip. See `model/page-setup.ts`.
    */
   pageSetup: PageSetup;
+  /**
+   * Every reusable style this document defines, by id (M23).
+   *
+   * Part of the model -- and therefore part of history -- for the same reason assets are: an object
+   * stores an *id*, so undo that restored the objects but not the definitions would restore
+   * references to nothing, and the effective values would silently change.
+   *
+   * Always present, possibly empty. A pre-M23 document has none, and the migration gives it `[]`
+   * rather than leaving the field optional -- so there is one shape to read, and "no styles" is a
+   * value rather than an absence.
+   */
+  styles: StyleDefinition[];
   /**
    * Every asset this document owns, by id.
    *

@@ -154,6 +154,25 @@ export const DOCUMENT_KEYS = [
   'id',
   'name',
   'pageSetup',
+  'styles',
+  'assets',
+  'pages',
+] as const;
+
+/**
+ * Versions 1–4: `pageSetup`, and **no** `styles`.
+ *
+ * M23 adds `styles`, so the key list is version-dependent twice over and `documentKeysFor` now has
+ * two thresholds rather than one. Stating the pre-M23 list separately keeps the difference visible:
+ * a v4 document is not merely a v5 document with an empty array, it is a document this build may
+ * have to *refuse* if it contains a style it does not understand.
+ */
+export const PRE_STYLE_DOCUMENT_KEYS = [
+  'format',
+  'formatVersion',
+  'id',
+  'name',
+  'pageSetup',
   'assets',
   'pages',
 ] as const;
@@ -178,7 +197,12 @@ export const LEGACY_DOCUMENT_KEYS = [
  * document written before this milestone.
  */
 export function documentKeysFor(version: number): readonly string[] {
-  return version >= 3 ? DOCUMENT_KEYS : LEGACY_DOCUMENT_KEYS;
+  if (version < 3) return LEGACY_DOCUMENT_KEYS;
+  // `styles` was added in v5. A v4 document carrying one is a document from the future, and this
+  // build must refuse it **by name** rather than open it and then re-save it without the styles --
+  // which would silently detach every styled object from its definition, the exact loss this format's
+  // "refuse, do not drop" policy exists to prevent.
+  return version >= 5 ? DOCUMENT_KEYS : PRE_STYLE_DOCUMENT_KEYS;
 }
 
 export const PAGE_SIZE_KEYS = ['width', 'height', 'unit', 'orientation'] as const;
@@ -235,11 +259,14 @@ export const PAINT_KEYS = ['type', 'color'] as const;
 
 export const RICH_TEXT_KEYS = ['blocks'] as const;
 
-/** Versions 1-3: alignment and runs only. No authorable direction, no paragraph metrics. */
+/** Versions 1–4: alignment and runs only. No authorable direction, no metrics, no style. */
 export const LEGACY_PARAGRAPH_KEYS = ['kind', 'align', 'runs'] as const;
 
-/** Version 4 and later: adds `dir` and `metrics`. */
-export const PARAGRAPH_KEYS = ['kind', 'align', 'dir', 'metrics', 'runs'] as const;
+/** Version 4: adds `dir` and `metrics`. */
+export const V4_PARAGRAPH_KEYS = ['kind', 'align', 'dir', 'metrics', 'runs'] as const;
+
+/** Version 5 and later: adds `styleId`. */
+export const PARAGRAPH_KEYS = ['kind', 'align', 'dir', 'metrics', 'styleId', 'runs'] as const;
 
 /**
  * Paragraph keys legal for `version`.
@@ -252,7 +279,11 @@ export const PARAGRAPH_KEYS = ['kind', 'align', 'dir', 'metrics', 'runs'] as con
  * exists to prevent.
  */
 export function paragraphKeysFor(version: number): readonly string[] {
-  return version >= 4 ? PARAGRAPH_KEYS : LEGACY_PARAGRAPH_KEYS;
+  if (version < 4) return LEGACY_PARAGRAPH_KEYS;
+  // `styleId` arrived in v5, and the same refuse-don't-drop argument as the document level applies:
+  // accepting it in v4 would mean saving the paragraph without the field, detaching it from its
+  // style and rendering it differently for no reason the user could see.
+  return version >= 5 ? PARAGRAPH_KEYS : V4_PARAGRAPH_KEYS;
 }
 
 /** The three base directions a paragraph may declare. */
@@ -267,7 +298,51 @@ export const PARAGRAPH_METRIC_KEYS = [
   'textIndent',
 ] as const;
 
-export const RUN_KEYS = ['text', 'format'] as const;
+export const RUN_KEYS = ['text', 'format', 'styleId'] as const;
+
+/** Versions 1–4: no style reference on a run. */
+export const LEGACY_RUN_KEYS = ['text', 'format'] as const;
+
+/**
+ * Run keys legal for `version`.
+ *
+ * A run gained `styleId` in v5, and the refusal matters more here than at the document level: a
+ * v4 build that accepted an unknown `styleId` and dropped it would leave a styled run looking
+ * unstyled after a single save, with nothing to indicate why.
+ */
+export function runKeysFor(version: number): readonly string[] {
+  return version >= 5 ? RUN_KEYS : LEGACY_RUN_KEYS;
+}
+
+/** A style definition's own keys, common to all three categories. */
+export const STYLE_IDENTITY_KEYS = ['id', 'name', 'kind'] as const;
+
+/** The character category's payload key. */
+export const CHARACTER_STYLE_KEYS = ['id', 'name', 'kind', 'character'] as const;
+
+/** The paragraph category's payload key. */
+export const PARAGRAPH_STYLE_KEYS = ['id', 'name', 'kind', 'paragraph'] as const;
+
+/** The frame category's payload key. */
+export const FRAME_STYLE_KEYS = ['id', 'name', 'kind', 'frame'] as const;
+
+/**
+ * The keys legal for a style of `kind`.
+ *
+ * Keyed by category rather than validated loosely, so a character style carrying a `paragraph` key is
+ * refused by name. That is the on-disk half of the discriminated union: the type says the invalid
+ * combination cannot be written, and this says a hand-edited file cannot smuggle one past it.
+ */
+export function styleKeysFor(kind: string): readonly string[] {
+  if (kind === 'character') return CHARACTER_STYLE_KEYS;
+  if (kind === 'paragraph') return PARAGRAPH_STYLE_KEYS;
+  if (kind === 'frame') return FRAME_STYLE_KEYS;
+  // Returned for an unknown kind so the *kind* is what the error names, rather than every key at once.
+  return STYLE_IDENTITY_KEYS;
+}
+
+/** The category names a style definition may declare. */
+export const STYLE_KINDS = ['character', 'paragraph', 'frame'] as const;
 
 export const TEXT_STYLE_KEYS = [
   'fontFamily',
@@ -288,6 +363,25 @@ export const SHARED_NODE_KEYS = [
   'opacity',
   'blendMode',
 ] as const;
+
+/**
+ * Node keys legal for `version`, per node type.
+ *
+ * `styleId` is **not** shared. Only a text frame may reference a frame style, and only a `character`
+ * style at that -- so putting it in `SHARED_NODE_KEYS` would let a shape carry `styleId: "sty_1"`
+ * pointing at a paragraph style, with nothing downstream able to complain. The three reference sites
+ * each ask for their own list instead, which is why this takes the node type.
+ */
+export function nodeKeysFor(
+  type: 'shape' | 'textFrame' | 'image' | 'group',
+  version: number,
+): readonly string[] {
+  const shared = version >= 5 ? [...SHARED_NODE_KEYS, 'styleId'] : SHARED_NODE_KEYS;
+  if (type === 'shape') return [...shared, 'shape', 'fill', 'stroke', 'extensions'];
+  if (type === 'textFrame') return [...shared, 'text', 'style', 'extensions'];
+  if (type === 'image') return [...shared, 'asset', 'fit', 'extensions'];
+  return [...shared, ...GROUP_NODE_KEYS, 'extensions'];
+}
 
 // ---------------------------------------------------------------------------
 // Closed sets

@@ -67,7 +67,7 @@ describe('the version has one owner', () => {
     // The structural half of the argument lives in `eslint.config.js`'s layer rules: `model` may not
     // import `persist`, which is precisely why the constant had to move. A test cannot check a lint
     // rule, so it is stated here instead of pretended to be verified.
-    expect(fromFormat).toBe(4);
+    expect(fromFormat).toBe(5);
     expect(MINIMUM_FORMAT_VERSION).toBeLessThan(fromFormat);
   });
 

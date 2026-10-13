@@ -102,6 +102,8 @@ function documentWith(objects: unknown[], assets: Record<string, unknown> = {}):
       defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },
+    // M23: every document carries a style table, possibly empty.
+    styles: [],
     assets,
     pages: [
       {
@@ -348,6 +350,10 @@ describe('the version', () => {
     const legacySize = { width: 400, height: 300, unit: 'pt', orientation: 'portrait' };
     for (const page of pages) delete page['size'];
     delete modern['pageSetup'];
+    // M23, for the reason `validation.test.ts`'s `legacyDocument` gives: a document stamped as an
+    // old version must not carry `styles`, and refusing it is the behaviour `documentKeysFor`
+    // exists to provide. Leaving it on would make this test fail for the wrong reason.
+    delete modern['styles'];
     const previous = { ...modern, formatVersion: MINIMUM_FORMAT_VERSION, pageSize: legacySize };
 
     const parsed = parse(previous as unknown as PersistedDocument);

@@ -66,6 +66,8 @@ function docWith(objects: Node[]): Document {
     id: 'doc',
     name: 'doc',
     pageSetup: createPageSetup({ defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' } }),
+    // M23: a document with no styles, spelled the way the model spells it.
+    styles: [],
     assets: {},
     pages: [
       { id: 'p1', name: '1', size: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects },

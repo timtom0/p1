@@ -266,7 +266,7 @@ export interface CreateDocumentOptions extends Partial<Omit<Document, 'id' | 'pa
  * while every previous version was a strict subset of the current one, and records why that stopped
  * being so.
  */
-export const CURRENT_FORMAT_VERSION = 4;
+export const CURRENT_FORMAT_VERSION = 5;
 
 export function createDocument(init: CreateDocumentOptions = {}): Document {
   const { pageSize, fixedSize, resizeBehaviour, pageSetup, ...rest } = init;
@@ -297,6 +297,10 @@ export function createDocument(init: CreateDocumentOptions = {}): Document {
     // handling anywhere -- including in a deserializer, where a missing field would
     // otherwise be a special case at every read site.
     assets: {},
+    // M23, for the same reason and with the same payoff: `styles` is read on the render
+    // path for every styled object, and an optional field would make every one of those reads
+    // guard. Spread after, so a caller can seed a document with styles.
+    styles: [],
     ...rest,
     pages,
   };

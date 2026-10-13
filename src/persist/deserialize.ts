@@ -52,6 +52,8 @@ import type {
   ParagraphDirection,
   ParagraphMetrics,
   ParagraphBlock,
+  ParagraphStyleProps,
+  StyleDefinition,
   RichText,
   ShapeGeometry,
   ShapeKind,
@@ -70,8 +72,8 @@ import {
   DOCUMENT_FORMAT,
   documentKeysFor,
   DocumentParseError,
-  GROUP_NODE_KEYS,
   MINIMUM_FORMAT_VERSION,
+  nodeKeysFor,
   ORIENTATIONS,
   PAGE_SETUP_KEYS,
   pageKeysFor,
@@ -82,8 +84,8 @@ import {
   paragraphKeysFor,
   PARAGRAPH_METRIC_KEYS,
   RICH_TEXT_KEYS,
-  RUN_KEYS,
-  SHARED_NODE_KEYS,
+  runKeysFor,
+  styleKeysFor,
   STROKE_ALIGNS,
   STROKE_KEYS,
   TEXT_STYLE_KEYS,
@@ -329,6 +331,12 @@ function parseDocument(root: Record<string, unknown>, version: number): Document
       id,
       name,
       pageSetup: parsePageSetup(root['pageSetup']),
+      // M23. A pre-v5 document has no `styles` key at all, and `documentKeysFor` has already
+      // refused a v4 document that *does* carry one. So this is the whole migration: the absence of
+      // the field becomes an empty list, and every object in it already reads `styleId: undefined`,
+      // which resolves to "nothing inherited" -- exactly what those documents meant before styles
+      // existed. Nothing is rewritten and nothing is inferred from formatting.
+      styles: version >= 5 ? parseStyles(root['styles']) : [],
       assets: parseAssets(root['assets']),
       pages: parsePages(root['pages'], version),
     };
@@ -344,10 +352,103 @@ function parseDocument(root: Record<string, unknown>, version: number): Document
       defaultSize: clonePageSize(legacySize),
       resizeBehaviour: 'crop',
     }),
+    styles: [],
     assets: parseAssets(root['assets']),
     // `parsePages` passes the inherited size down, so the page list itself has no version branch.
     pages: parsePages(root['pages'], version, legacySize),
   };
+}
+
+/**
+ * M23: parses the document's style table.
+ *
+ * Two rules that are not obvious, and both are load-bearing.
+ *
+ * **Ids are validated for uniqueness here, at load.** A duplicate id is refused rather than
+ * resolved first-wins, because `resolveStyle` finds by id: with two definitions sharing one id,
+ * which one an object inherits from would depend on array order, so editing the other would appear
+ * to do nothing. A duplicate is a corrupt file, not a document with a quirk.
+ *
+ * **References are *not* validated here.** A `styleId` naming nothing — or naming a style of the
+ * wrong kind — is accepted, and resolves to "nothing inherited" at render time. The alternative,
+ * refusing the document, would mean one bad id anywhere makes the whole file unopenable, for a
+ * condition the renderer already handles correctly and visibly. Repairing it by deleting the
+ * reference would be worse still: it would write a change the user never asked for. The condition is
+ * assertable through `documentReferences`, which is what the tests use instead of expecting a crash.
+ */
+function parseStyles(input: unknown): StyleDefinition[] {
+  const list = expectArray(input, 'styles');
+  const seen = new Set<string>();
+
+  return list.map((entry, index) => {
+    const path = `styles[${index}]`;
+    const record = expectRecord(entry, path);
+    const kind = expectString(record['kind'], `${path}.kind`);
+    expectOnlyKeys(record, path, styleKeysFor(kind));
+
+    const id = expectId(record['id'], `${path}.id`);
+    if (seen.has(id)) {
+      throw new DocumentParseError(`${path}.id`, `duplicate style id "${id}"`);
+    }
+    seen.add(id);
+
+    const name = expectString(record['name'], `${path}.name`);
+    if (name.trim() === '') {
+      throw new DocumentParseError(`${path}.name`, 'must not be empty');
+    }
+
+    if (kind === 'character') {
+      return { id, name, kind, character: parseCharFormat(record['character'], `${path}.character`) };
+    }
+    if (kind === 'paragraph') {
+      return { id, name, kind, paragraph: parseParagraphStyleProps(record['paragraph'], `${path}.paragraph`) };
+    }
+    if (kind === 'frame') {
+      return { id, name, kind, frame: parseTextStyle(record['frame'], `${path}.frame`) };
+    }
+    // Reached only because `styleKeysFor` returns the identity keys for an unknown kind, so the
+    // error names the *kind* -- the one thing the reader needs to know is wrong.
+    throw new DocumentParseError(`${path}.kind`, `unknown style kind "${kind}"`);
+  });
+}
+
+/**
+ * The properties a paragraph style may define.
+ *
+ * The same shape as `ParagraphBlock` minus `kind`, `styleId` and `runs` -- and a paragraph style
+ * holding a reference to another style is refused here, because that is a parent-style hierarchy and
+ * M23 explicitly does not have one. Saying so at the format boundary means a hand-edited file cannot
+ * introduce one that the renderer would then have to honour.
+ */
+function parseParagraphStyleProps(input: unknown, path: string): ParagraphStyleProps {
+  const record = expectRecord(input, path);
+  expectOnlyKeys(record, path, PARAGRAPH_STYLE_PROP_KEYS);
+  const props: ParagraphStyleProps = {};
+
+  if (record['align'] !== undefined) {
+    props.align = expectEnum(record['align'], `${path}.align`, PARAGRAPH_ALIGNS) as ParagraphAlign;
+  }
+  if (record['dir'] !== undefined) {
+    props.dir = expectEnum(record['dir'], `${path}.dir`, PARAGRAPH_DIRECTIONS) as ParagraphDirection;
+  }
+  if (record['metrics'] !== undefined) {
+    props.metrics = parseParagraphMetrics(record['metrics'], `${path}.metrics`);
+  }
+  return props;
+}
+
+/** The keys a paragraph *style's* payload may carry. A style defines; it does not reference. */
+export const PARAGRAPH_STYLE_PROP_KEYS = ['align', 'dir', 'metrics'] as const;
+
+/** Reuses the run's flag parser, so a style's flags are validated by exactly the same rules. */
+function parseCharFormat(input: unknown, path: string): CharFormat {
+  const record = expectRecord(input, path);
+  expectOnlyKeys(record, path, CHAR_FLAGS);
+  const format: CharFormat = {};
+  for (const flag of CHAR_FLAGS) {
+    if (record[flag] === true) format[flag] = true;
+  }
+  return format;
 }
 
 function parsePageSetup(input: unknown): PageSetup {
@@ -484,7 +585,7 @@ function parseNode(input: unknown, path: string, version: number): Node {
 
   switch (type) {
     case 'shape': {
-      expectOnlyKeys(record, path, [...SHARED_NODE_KEYS, 'shape', 'fill', 'stroke', 'extensions']);
+      expectOnlyKeys(record, path, nodeKeysFor('shape', version));
       const node: ShapeNode = {
         type: 'shape',
         ...parseSharedNode(record, path),
@@ -504,7 +605,7 @@ function parseNode(input: unknown, path: string, version: number): Node {
       return node;
     }
     case 'textFrame': {
-      expectOnlyKeys(record, path, [...SHARED_NODE_KEYS, 'text', 'style', 'extensions']);
+      expectOnlyKeys(record, path, nodeKeysFor('textFrame', version));
       const node: TextFrameNode = {
         type: 'textFrame',
         ...parseSharedNode(record, path),
@@ -519,7 +620,7 @@ function parseNode(input: unknown, path: string, version: number): Node {
       return node;
     }
     case 'image': {
-      expectOnlyKeys(record, path, [...SHARED_NODE_KEYS, 'asset', 'fit', 'extensions']);
+      expectOnlyKeys(record, path, nodeKeysFor('image', version));
       const node: ImageNode = {
         type: 'image',
         ...parseSharedNode(record, path),
@@ -539,7 +640,7 @@ function parseNode(input: unknown, path: string, version: number): Node {
       // `children` is **required, never optional**. An absent `children` would have to default to
       // `[]`, and "absent means no children" is exactly the kind of ambiguity ADR 0007 exists to
       // remove: two spellings, one meaning. A group with no children is written as `children: []`.
-      expectOnlyKeys(record, path, [...SHARED_NODE_KEYS, ...GROUP_NODE_KEYS, 'extensions']);
+      expectOnlyKeys(record, path, nodeKeysFor('group', version));
       const node: GroupNode = {
         type: 'group',
         ...parseSharedNode(record, path),
@@ -683,7 +784,7 @@ function parseParagraph(input: unknown, path: string, version: number): Paragrap
   const runs = expectArray(record['runs'], `${path}.runs`);
   const block: ParagraphBlock = {
     kind: 'paragraph',
-    runs: runs.map((run, index) => parseRun(run, `${path}.runs[${index}]`)),
+    runs: runs.map((run, index) => parseRun(run, `${path}.runs[${index}]`, version)),
   };
   if (record['align'] !== undefined) {
     block.align = expectEnum(record['align'], `${path}.align`, PARAGRAPH_ALIGNS) as ParagraphAlign;
@@ -697,6 +798,12 @@ function parseParagraph(input: unknown, path: string, version: number): Paragrap
   }
   if (record['metrics'] !== undefined) {
     block.metrics = parseParagraphMetrics(record['metrics'], `${path}.metrics`);
+  }
+  // M23. Accepted without being checked against the style table: an id naming nothing, or naming
+  // the wrong category, resolves to "nothing inherited" rather than refusing the file. See
+  // `parseStyles` for why the reference is not repaired or refused.
+  if (record['styleId'] !== undefined) {
+    block.styleId = expectId(record['styleId'], `${path}.styleId`);
   }
   return block;
 }
@@ -722,14 +829,18 @@ function parseParagraphMetrics(input: unknown, path: string): ParagraphMetrics {
   return metrics;
 }
 
-function parseRun(input: unknown, path: string): ParagraphBlock['runs'][number] {
+function parseRun(input: unknown, path: string, version: number): ParagraphBlock['runs'][number] {
   const record = expectRecord(input, path);
-  expectOnlyKeys(record, path, RUN_KEYS);
+  expectOnlyKeys(record, path, runKeysFor(version));
   const run: ParagraphBlock['runs'][number] = {
     text: expectString(record['text'], `${path}.text`),
   };
   if (record['format'] !== undefined) {
     run.format = parseFormat(record['format'], `${path}.format`);
+  }
+  // M23: see `parseParagraph` -- accepted unchecked, resolves to nothing if unresolvable.
+  if (record['styleId'] !== undefined) {
+    run.styleId = expectId(record['styleId'], `${path}.styleId`);
   }
   return run;
 }

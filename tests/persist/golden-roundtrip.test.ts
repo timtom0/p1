@@ -53,7 +53,7 @@ import {
   DocumentParseError,
 } from '../../src/persist/format';
 
-const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample-v4.p1doc', import.meta.url));
+const FIXTURE_PATH = fileURLToPath(new URL('../golden/sample-v5.p1doc', import.meta.url));
 const HANDWRITTEN_PATH = fileURLToPath(new URL('../golden/handwritten.p1doc', import.meta.url));
 const FIXTURE_TEXT = readFileSync(FIXTURE_PATH, 'utf8');
 
@@ -507,6 +507,8 @@ describe('determinism', () => {
       id: 'doc_1',
       name: 'Key order',
       pageSetup: createPageSetup({ defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' } }),
+      // M23: a document with no styles, spelled the way the model spells it.
+      styles: [],
       assets: {},
       pages: [{ id: 'page_1', name: 'P', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects }],
     });
@@ -542,6 +544,8 @@ describe('ids', () => {
       id: 'doc_9',
       name: 'Ids',
       pageSetup: createPageSetup({ defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' } }),
+      // M23: every document carries a style table, possibly empty.
+      styles: [],
       assets: {},
       pages: [
         {
