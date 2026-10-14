@@ -26,16 +26,29 @@ import type {
   TextFrameNode,
   TextStyle,
   Transform2D,
+  StyleDefinition,
+  CharFormat,
+  InlineRun,
 } from './types';
 import { createId } from '../core/ids';
 import { createTransform, createGroupNode, createPage } from './factory';
 import {
+  CHAR_FLAGS,
+  formatsEqual,
   normalizeRichText,
   PARAGRAPH_METRIC_KEYS,
   paragraphMetricsEqual,
   richTextEqual as richTextEquals,
 } from './rich-text';
 import { prunedAssetTable } from './assets';
+import {
+  applyDeleteStyle,
+  addStyle,
+  renameStyle as renameStyleIn,
+  replaceStyle,
+  type StyleRemovalMode,
+} from './style-commands';
+import { resolveStyle, type StyleCategory } from './styles';
 import { worldTransformIn, pageSizeToPx as pageExtentPx } from './transform';
 import { isGroup, locateNode, mapNodesByIdIn, removeNodesById } from './tree';
 import {
@@ -93,6 +106,47 @@ export type Command =
    * therefore spelled out key by key rather than implied by an empty patch.
    */
   | { type: 'setParagraphMetrics'; nodeId: string; patch: ParagraphMetricsPatch }
+  // --- styles (M23) ---------------------------------------------------------------------------
+  /** Adds a definition. The id is minted by the caller so no command can supply its own. */
+  | { type: 'addStyle'; style: StyleDefinition }
+  /** Replaces a definition wholesale, which is how a category change is expressed. */
+  | { type: 'updateStyle'; id: string; style: StyleDefinition }
+  /** Renames a definition. Never touches the id, so references cannot break. */
+  | { type: 'renameStyle'; id: string; name: string }
+  /** Deletes a definition **and settles every reference to it** in the same command. */
+  | { type: 'deleteStyle'; id: string; mode: StyleRemovalMode }
+  /**
+   * Points objects at a style, or clears the reference.
+   *
+   * `styleId: null` is the model path for "remove style": direct values survive untouched and the
+   * style's contribution falls back to the defaults. Unlink is a separate command, because the two
+   * have opposite consequences and a flag would make the destructive one the default spelling.
+   *
+   * `category` names which reference sites are written -- a run, a paragraph or a frame. It is part
+   * of the command rather than inferred, so a style is only ever applied where its category can
+   * resolve and the type keeps the categories apart.
+   */
+  | {
+      type: 'applyStyle';
+      ids: readonly string[];
+      category: StyleCategory;
+      styleId: string | null;
+    }
+  /**
+   * Writes one property directly on the object, overriding whatever its style supplies.
+   *
+   * Separate from `setTextStyle`/`setTextAlign`/`setTextDirection`/`setParagraphMetrics` because
+   * those say "set this property" while this says "set this property *against the style*". For a
+   * frame the two are the same mutation today; for a paragraph or a run they are not, and conflating
+   * them would make "clear the override" unreachable without also losing the reference.
+   */
+  | {
+      type: 'setStyleOverride';
+      ids: readonly string[];
+      category: StyleCategory;
+      key: string;
+      value: string | number | null;
+    }
   | { type: 'setPageProps'; pageId: string; props: PagePropsPatch }
   // --- page management (M20) -------------------------------------------------------------------------------------
   /**
@@ -453,6 +507,34 @@ export function apply(doc: Document, command: Command): Document {
         };
       });
     }
+
+    case 'addStyle':
+      return addStyle(doc, command.style);
+
+    case 'updateStyle':
+      return replaceStyle(doc, command.id, command.style);
+
+    case 'renameStyle':
+      return renameStyleIn(doc, command.id, command.name);
+
+    case 'deleteStyle':
+      return applyDeleteStyle(doc, command.id, command.mode);
+
+    case 'applyStyle':
+      return mapNodesById(doc, command.ids, (node) => {
+        if (node.type !== 'textFrame') return node;
+        // Each category writes only the site it owns, so a character style applied to a frame is a
+        // no-op on it rather than a reference that resolves to nothing.
+        const next = applyStyleToFrame(node, doc.styles, command.category, command.styleId);
+        return next === node ? node : { ...node, text: normalizeRichText(next.text) };
+      });
+
+    case 'setStyleOverride':
+      return mapNodesById(doc, command.ids, (node) => {
+        if (node.type !== 'textFrame') return node;
+        const next = setOverrideOnFrame(node, doc.styles, command.category, command.key, command.value);
+        return next === node ? node : { ...next, text: normalizeRichText(next.text) };
+      });
 
     case 'setPageProps': {
       return replacePages(
@@ -951,6 +1033,20 @@ export function describeCommand(command: Command): string {
       return 'Align';
     case 'setTextDirection':
       return 'Text direction';
+    // M23. `addStyle` is named after what it does rather than reported as a generic "Insert",
+    // because the undo label is the only place the user reads what a style operation was.
+    case 'addStyle':
+      return `Create style ${command.style.name}`;
+    case 'updateStyle':
+      return `Edit style ${command.style.name}`;
+    case 'renameStyle':
+      return 'Rename style';
+    case 'deleteStyle':
+      return command.mode === 'remove' ? 'Delete style' : 'Unlink style and delete';
+    case 'applyStyle':
+      return command.styleId === null ? 'Remove style' : 'Apply style';
+    case 'setStyleOverride':
+      return `Override ${command.key}`;
     case 'setParagraphMetrics':
       return 'Paragraph indent';
     case 'insert':
@@ -1226,4 +1322,159 @@ export function asShape(node: Node): ShapeNode | null {
 /** Convenience: the transform of any node. */
 export function transformOf(node: Node): Transform2D {
   return node.transform;
+}
+
+/**
+ * M23: points a frame's reference site for `category` at `styleId`, or clears it.
+ *
+ * A frame carries three reference sites -- the frame itself, each of its paragraphs, each of its
+ * runs -- and this writes **only** the one the category names. Applying a character style to a
+ * selection does not touch paragraph alignment, and applying a paragraph style to a frame does not
+ * reach into its runs; keeping the sites apart here is what stops one apply from silently rewriting
+ * three kinds of formatting.
+ *
+ * Applying a *paragraph* style to a frame writes the reference on every paragraph rather than on the
+ * frame, because that is where the reference lives -- the same fan-out `setTextAlign` does. The
+ * consequence is deliberate and documented rather than smoothed over: it converges those paragraphs
+ * onto one style, so a frame whose paragraphs had different styles looks unified afterwards.
+ *
+ * A style id that does not resolve to a definition of `category` is refused as a no-op rather than
+ * written. Writing it would put a reference in the document that nothing can resolve -- invisible
+ * until someone tried to unlink it.
+ */
+function applyStyleToFrame(
+  node: TextFrameNode,
+  styles: readonly StyleDefinition[],
+  category: StyleCategory,
+  styleId: string | null,
+): TextFrameNode {
+  if (styleId !== null && resolveStyle(styles, styleId, category) === undefined) return node;
+
+  if (category === 'frame') {
+    if (node.styleId === styleId) return node;
+    return { ...node, styleId: styleId ?? undefined };
+  }
+
+  const alreadyEverywhere = node.text.blocks.every((block) =>
+    category === 'character'
+      ? block.runs.every((run) => run.styleId === styleId)
+      : block.styleId === styleId,
+  );
+  // An empty frame has no paragraphs to converge, so this must not report "already everywhere" for a
+  // request it cannot satisfy -- hence the explicit length check rather than `every` alone.
+  if (node.text.blocks.length > 0 && alreadyEverywhere) return node;
+
+  return {
+    ...node,
+    text: {
+      blocks: node.text.blocks.map((block) =>
+        category === 'character'
+          ? { ...block, runs: block.runs.map((run) => ({ ...run, styleId: styleId ?? undefined })) }
+          : { ...block, styleId: styleId ?? undefined },
+      ),
+    },
+  };
+}
+
+/**
+ * M23: writes one property as a **direct override**, leaving the style reference in place.
+ *
+ * This is the operation that makes "override colour, keep inheriting size and indent" expressible,
+ * and the reason it is not simply `setTextStyle`: those commands answer "what is this frame's
+ * style", while this one answers "what does this object override *against its style*". For a frame
+ * the two coincide today; for a paragraph or a run they do not, and collapsing them would mean
+ * clearing an override also had to drop the reference -- losing the inheritance the user wanted.
+ *
+ * `value: null` clears the override. It does **not** remove the reference: that is `applyStyle` with a
+ * null id, and conflating them is the difference between "stop overriding this" and "stop using this
+ * style".
+ *
+ * Returned by identity when nothing changed, so `isNoop` sees it and no history is recorded.
+ */
+function setOverrideOnFrame(
+  node: TextFrameNode,
+  _styles: readonly StyleDefinition[],
+  category: StyleCategory,
+  key: string,
+  value: string | number | null,
+): TextFrameNode {
+  if (category === 'frame') {
+    const style: Record<string, unknown> = { ...(node.style ?? {}) };
+    delete style[key];
+    if (value !== null) style[key] = value;
+    const next = Object.values(style).some((entry) => entry !== undefined)
+      ? (style as TextStyle)
+      : undefined;
+    if (textStyleEqual(next, node.style)) return node;
+    return { ...node, style: next };
+  }
+
+  const blocks = node.text.blocks.map((block) => {
+    if (category === 'paragraph') {
+      const next = setParagraphOverride(block, key, value);
+      return next === block ? block : { ...next, runs: block.runs };
+    }
+    const runs = block.runs.map((run) => {
+      const next = setRunOverride(run, key, value);
+      return next === run ? run : next;
+    });
+    return runs.some((run, index) => run !== block.runs[index]) ? { ...block, runs } : block;
+  });
+
+  return blocks.some((block, index) => block !== node.text.blocks[index])
+    ? { ...node, text: { blocks } }
+    : node;
+}
+
+/** Align, direction, or one of the five metrics -- on one paragraph. */
+function setParagraphOverride(
+  block: ParagraphBlock,
+  key: string,
+  value: string | number | null,
+): ParagraphBlock {
+  if (key === 'align') {
+    const next = value === null ? undefined : (value as ParagraphAlign);
+    if (block.align === next) return block;
+    return { ...block, align: next };
+  }
+  if (key === 'dir') {
+    const next = value === null ? undefined : (value as ParagraphDirection);
+    if (block.dir === next) return block;
+    return { ...block, dir: next };
+  }
+
+  const metrics: Record<string, unknown> = { ...(block.metrics ?? {}) };
+  delete metrics[key];
+  if (value !== null) metrics[key] = value;
+  const nextMetrics = Object.values(metrics).some((entry) => entry !== undefined)
+    ? (metrics as ParagraphMetrics)
+    : undefined;
+  if (paragraphMetricsEqual(block.metrics, nextMetrics)) return block;
+  return { ...block, metrics: nextMetrics };
+}
+
+/** One character flag -- on one run. Only `CHAR_FLAGS` are accepted, so the key cannot be arbitrary. */
+function setRunOverride(
+  run: InlineRun,
+  key: string,
+  value: string | number | null,
+): InlineRun {
+  if (!(CHAR_FLAGS as readonly string[]).includes(key)) return run;
+  const flag = key as keyof CharFormat;
+
+  const format: CharFormat = { ...(run.format ?? {}) };
+  delete (format as Record<string, unknown>)[key];
+  // A flag is `true` or absent, so any non-null value means "set" -- never `false`, which would be a
+  // second spelling of the same visual text.
+  if (value !== null) format[flag] = true;
+
+  const hasAny = CHAR_FLAGS.some((name) => format[name] === true);
+  if (formatsEqual(run.format, hasAny ? format : undefined)) return run;
+
+  // The reference survives untouched: that is the entire point of an override.
+  return {
+    text: run.text,
+    ...(hasAny ? { format } : {}),
+    ...(run.styleId === undefined ? {} : { styleId: run.styleId }),
+  };
 }
