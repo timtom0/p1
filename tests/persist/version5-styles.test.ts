@@ -400,7 +400,6 @@ describe('a reference the document cannot resolve', () => {
   it('treats a wrong-category reference as unresolved rather than as an error', () => {
     const withCategory: Record<string, unknown> = dangling();
     // `sty_quote` exists but is a *paragraph* style, referenced from a run.
-    (withCategory['styles'] as unknown[]).length;
     const styles = [QUOTE];
     const frames = (withCategory['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]
       ?.objects as Array<Record<string, unknown>>;

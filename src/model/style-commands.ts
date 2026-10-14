@@ -207,15 +207,26 @@ function rewriteText(
  * visible: the block's own alignment, direction and metrics are what the user still has, and the
  * whole claim of `remove` is that they are left exactly as they were.
  */
+/**
+ * Drops `styleId` without materialising anything.
+ *
+ * `Remove` has to remove the reference and nothing else, and the two ways to spell that are both
+ * bad here: a rest-destructure needs a throwaway binding the linter rightly objects to, and
+ * `delete` on a typed optional is a mutation the type system cannot see. This says what it does in
+ * one line and has exactly one call shape to get wrong.
+ */
+function dropStyleId<T extends { styleId?: string }>(value: T): T {
+  const next: T = { ...value };
+  delete next.styleId;
+  return next;
+}
+
 function unlinkParagraph(
   block: ParagraphBlock,
   styles: readonly StyleDefinition[],
   mode: StyleRemovalMode,
 ): ParagraphBlock {
-  if (mode === 'remove') {
-    const { styleId: _dropped, ...rest } = block;
-    return rest;
-  }
+  if (mode === 'remove') return dropStyleId(block);
 
   // Unlink: the style's share is resolved in and written down. Properties the block already overrode
   // are not flattened -- `effectiveParagraphProps` resolves each one to the overriding value, so
@@ -233,10 +244,7 @@ function unlinkRun(
   styles: readonly StyleDefinition[],
   mode: StyleRemovalMode,
 ): ParagraphBlock['runs'][number] {
-  if (mode === 'remove') {
-    const { styleId: _dropped, ...rest } = run;
-    return rest;
-  }
+  if (mode === 'remove') return dropStyleId(run);
 
   // A character style's flags are `true`-only and additive, so the resolved format is the union and
   // writing it down is the whole of unlink here. Emitted in canonical flag order so two equal runs

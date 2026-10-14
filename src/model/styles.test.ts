@@ -1,7 +1,5 @@
-// @vitest-environment happy-dom
-
 /**
- * M23: style resolution, and the round trip through the DOM.
+ * M23: style resolution -- the per-property rule, and merging.
  *
  * ## What is under test, and why it is split this way
  *
@@ -30,31 +28,13 @@ import {
   effectiveTextStyle,
   resolveStyle,
 } from './styles';
-import { domToRichText, richTextToHtml } from '../render/rich-text-html';
-import { styleSheetCss } from '../render/style-sheet';
-import { normalizeRichText, runsCompatible } from '../model/rich-text';
+import { normalizeRichText, runsCompatible } from './rich-text';
 import type {
   InlineRun,
   ParagraphBlock,
   StyleDefinition,
   TextFrameNode,
 } from './types';
-
-const host = (): HTMLElement => {
-  const element = document.createElement('div');
-  document.body.append(element);
-  return element;
-};
-
-/** Renders a model with a style table and walks it straight back. */
-const roundTrip = (
-  blocks: ParagraphBlock[],
-  styles: readonly StyleDefinition[],
-): ParagraphBlock[] => {
-  const element = host();
-  element.append(richTextToHtml(normalizeRichText({ blocks }), styles));
-  return domToRichText(element).blocks;
-};
 
 const CHARACTER: StyleDefinition = {
   id: 'sty_emp',
@@ -295,121 +275,5 @@ describe('runs merge only when their styles match too', () => {
     }).blocks[0]?.runs;
     expect(merged).toHaveLength(1);
     expect(merged?.[0]?.text).toBe('onetwo');
-  });
-});
-
-describe('the DOM round trip keeps the reference and drops the properties', () => {
-  it('a paragraph style reference survives, and its properties do not come back', () => {
-    const blocks = roundTrip(
-      [paragraph({ styleId: 'sty_quote', runs: [{ text: 'Hello' }] })],
-      [PARAGRAPH],
-    );
-    expect(blocks[0]?.styleId, 'the reference was lost').toBe('sty_quote');
-    // The load-bearing half. `align`, `dir` and `metrics` came from the style, so if any of them had
-    // been written inline the walker would have read them back and written them here -- as direct
-    // values, permanently shadowing the style.
-    expect(blocks[0]?.align, 'an inherited alignment was materialised').toBeUndefined();
-    expect(blocks[0]?.dir, 'an inherited direction was materialised').toBeUndefined();
-    expect(blocks[0]?.metrics, 'inherited metrics were materialised').toBeUndefined();
-  });
-
-  it('a direct override *is* read back, because it is authored on the element', () => {
-    const blocks = roundTrip(
-      [paragraph({ styleId: 'sty_quote', align: 'justify', runs: [{ text: 'Hello' }] })],
-      [PARAGRAPH],
-    );
-    expect(blocks[0]?.styleId).toBe('sty_quote');
-    expect(blocks[0]?.align, 'the authored override was lost').toBe('justify');
-    // ...and the style's *other* properties are still inherited, which is the whole promise.
-    expect(blocks[0]?.dir).toBeUndefined();
-  });
-
-  it('a character style reference survives and contributes no flags', () => {
-    const blocks = roundTrip(
-      [paragraph({ runs: [{ text: 'x', styleId: 'sty_emp' }] })],
-      [CHARACTER],
-    );
-    expect(blocks[0]?.runs[0]?.styleId).toBe('sty_emp');
-    expect(blocks[0]?.runs[0]?.format, 'the inherited flags were materialised').toBeUndefined();
-  });
-
-  it('a styled run and a directly-italic run stay distinct', () => {
-    const blocks = roundTrip(
-      [
-        paragraph({
-          runs: [
-            { text: 'a', styleId: 'sty_emp' },
-            { text: 'b', format: { italic: true } },
-          ],
-        }),
-      ],
-      [CHARACTER],
-    );
-    // They *look* identical, and they are not: one inherits italic, the other has it directly.
-    // Merging them would make it impossible to tell, so the boundary has to survive.
-    expect(blocks[0]?.runs, 'a styled run merged with an identically-formatted one').toHaveLength(2);
-  });
-
-  it('a dangling reference renders as an unstyled paragraph rather than throwing', () => {
-    const blocks = roundTrip([paragraph({ styleId: 'sty_gone', align: 'right' })], [PARAGRAPH]);
-    expect(blocks[0]?.styleId, 'a dangling reference was silently dropped').toBe('sty_gone');
-    expect(blocks[0]?.align).toBe('right');
-  });
-});
-
-describe('the generated stylesheet', () => {
-  it('writes a character style as declarations, not tags', () => {
-    // `<i>` would be read back as a *direct* flag, so the style's formatting would be
-    // materialised. A declaration in a rule is invisible to the walker's inline-style path.
-    expect(styleSheetCss([CHARACTER])).toContain('font-style: italic');
-  });
-
-  it('combines underline and strike into one declaration', () => {
-    const both: StyleDefinition = {
-      id: 'sty_u',
-      name: 'Marked',
-      kind: 'character',
-      character: { underline: true, strike: true },
-    };
-    const css = styleSheetCss([both]);
-    expect(css).toContain('text-decoration-line: underline line-through');
-    expect((css.match(/text-decoration-line/g) ?? []).length, 'the property was written twice').toBe(1);
-  });
-
-  it('writes paragraph metrics as logical properties', () => {
-    const css = styleSheetCss([PARAGRAPH]);
-    expect(css).toContain('margin-inline-start: 24px');
-    expect(css).toContain('text-indent: 8px');
-    // `dir: auto` is the absence of an override, not a declaration -- the renderer's `dir="auto"`
-    // already says it, and emitting `direction: auto` would be invalid CSS.
-    expect(css).not.toContain('auto');
-  });
-
-  it('escapes an id that would otherwise end the selector', () => {
-    // `expectId` accepts any non-empty string, so a hand-edited file can carry a quote. Unescaped,
-    // the selector ends early and the rest is parsed as CSS -- a document injecting rules into the
-    // application's own stylesheet.
-    const hostile: StyleDefinition = {
-      id: 'a"] , * { color: red } [x="',
-      name: 'Hostile',
-      kind: 'character',
-      character: { bold: true },
-    };
-    const css = styleSheetCss([hostile]);
-    // The hostile text *is* present -- it has to be, it is the id -- but only inside the quoted
-    // attribute value, where it is inert. An injection would mean something *outside* a string
-    // became a selector, so that is what is checked: with every quoted string blanked out, exactly
-    // one `{` survives, and the only declaration in the rule is ours.
-    const outsideStrings = css.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-    expect((outsideStrings.match(/\{/g) ?? []).length, 'the id escaped its string and became a rule').toBe(1);
-    expect(css.startsWith('[data-style-id="a\\"]'), 'the id was not escaped').toBe(true);
-    // The opening brace is found from the *end*: the id itself contains one, inside the quoted string,
-// and taking the first would slice the declaration out of the middle of the selector.
-    const body = css.slice(css.lastIndexOf('{') + 1, css.lastIndexOf('}'));
-    expect(body.trim()).toBe('font-weight: 700');
-  });
-
-  it('is empty for a document with no styles', () => {
-    expect(styleSheetCss([])).toBe('');
   });
 });

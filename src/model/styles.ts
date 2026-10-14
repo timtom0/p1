@@ -32,6 +32,7 @@ import type {
   CharFormat,
   Document,
   InlineRun,
+  Node,
   ParagraphAlign,
   ParagraphBlock,
   ParagraphDirection,
@@ -84,7 +85,7 @@ export function documentReferences(doc: Document): Array<{
     nodeId: string;
   }> = [];
 
-  const walk = (nodes: readonly import('./types').Node[]): void => {
+  const walk = (nodes: readonly Node[]): void => {
     for (const node of nodes) {
       if (node.type === 'group') {
         walk(node.children);

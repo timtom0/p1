@@ -87,8 +87,14 @@ export default tseslint.config(
   // constructing a DocumentView and a Viewport is precisely its job, so it is
   // exempt from the ui -> render restriction. Everything else in ui/ must go
   // through stores, selectors and commands. See docs/ARCHITECTURE.md §8.1.
+  //
+  // `print-profile.ts` is exempt for the same reason and is the *other* composition
+  // root: it builds the print surface, and a print surface rendered without the
+  // document's stylesheet is a different document from the one on screen (M23).
+  // Exempting the file keeps the ui -> render rule intact for the rest of the
+  // layer, which is the property worth protecting.
   {
-    files: ['src/ui/app.ts'],
+    files: ['src/ui/app.ts', 'src/ui/print-profile.ts'],
     rules: { 'no-restricted-imports': 'off' },
   },
   // The model and core layers are DOM-free.

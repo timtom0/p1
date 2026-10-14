@@ -25,6 +25,7 @@
  * conclude the checkbox is broken.
  */
 
+import { el } from './dom';
 import { createDocument } from '../model/factory';
 import { createPageSetup, PAGE_RESIZE_BEHAVIOURS, PAGE_SIZE_PRESETS, clonePageSize, type PageResizeBehaviour } from '../model/page-setup';
 import { isPhysicalUnit, type PhysicalUnit } from '../core/units/units';
@@ -36,26 +37,6 @@ const RESIZE_LABELS: Record<PageResizeBehaviour, string> = {
   scale: 'Scale — shrink content to fit the new page',
 };
 
-/**
- * A minimal element builder: `el('button', { type: 'button' }, 'Add')`.
- *
- * Variadic children rather than a single `text` argument because most of this panel is small trees
- * -- a row that is a button containing two spans -- and an `el` that took one string would need an
- * `append` after every nested element. Strings become text nodes, so a child is either an `HTMLElement`
- * or a string and never a bare value that could be stringified by accident.
- */
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Record<string, string> = {},
-  ...children: Array<Node | string>
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  for (const child of children) {
-    node.append(typeof child === 'string' ? document.createTextNode(child) : child);
-  }
-  return node;
-}
 
 
 export interface DocumentSetupDialog {
