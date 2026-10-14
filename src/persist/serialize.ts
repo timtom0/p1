@@ -197,6 +197,11 @@ function canonicalNode(node: Node): Node {
         text: canonicalRichText(node.text),
       };
       if (node.style !== undefined) out.style = canonicalTextStyle(node.style);
+      // M23: beside `style`, for the same reason a run's `styleId` sits beside its `format` -- and
+      // for the same reason it must be written at all. A frame style reference that the serialiser
+      // quietly omitted would survive in the model, vanish in the file, and reappear as "no style"
+      // on the next open: a defect that looks exactly like the user losing their formatting.
+      if (node.styleId !== undefined) out.styleId = node.styleId;
       if (node.extensions !== undefined) out.extensions = node.extensions;
       return out;
     }

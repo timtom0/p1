@@ -614,6 +614,15 @@ function parseNode(input: unknown, path: string, version: number): Node {
       if (record['style'] !== undefined) {
         node.style = parseTextStyle(record['style'], `${path}.style`);
       }
+      // M23. The frame's style reference, beside its direct typography rather than inside it -- so
+      // that "inherit the size, override the colour" stays two independent facts.
+      //
+      // Accepted without being checked against the style table, for the reason `parseParagraph`
+      // gives: an unresolvable id inherits nothing, and refusing the document would make one bad id
+      // anywhere unopenable. Repaired here it would write a change nobody asked for.
+      if (record['styleId'] !== undefined) {
+        node.styleId = expectId(record['styleId'], `${path}.styleId`);
+      }
       if (record['extensions'] !== undefined) {
         node.extensions = expectRecord(record['extensions'], `${path}.extensions`);
       }
