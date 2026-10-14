@@ -29,6 +29,7 @@ import { pageExtents, pageOffsetY, printPageName } from '../model/page';
 import { applyPageGeometry } from './layers/page';
 import { ObjectTypeRegistry, Reconciler } from './reconciler';
 import { createRenderContext } from './render-context';
+import { applyStyleSheet } from './style-sheet';
 import { shapeRenderer } from './types/shape';
 import { textFrameRenderer } from './types/text-frame';
 import { AssetResolver } from './assets';
@@ -201,6 +202,18 @@ export class DocumentView {
     // problem, because the node existed and was correctly sized; only the pixels were
     // missing.
     this.lastDocument = doc;
+
+    // M23. The document's stylesheet, written here and nowhere else.
+    //
+    // Placement is the whole design. A style edit changes no object: it changes a *definition*, and
+    // every object referencing it picks the change up because it is resolved at render time. So the
+    // one thing that has to happen on every render is that the rules are current -- and it has to
+    // happen *before* the reconcile loop, because a renderer reading a stale sheet would produce a
+    // frame whose attributes and rules disagree.
+    //
+    // This writes a `<style>` element and touches nothing else. Losing the sheet degrades to direct
+    // values, which is recoverable; storing resolved values in the model would not be.
+    applyStyleSheet(doc.styles);
 
     this.syncPages(doc, gap);
 

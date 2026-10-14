@@ -35,8 +35,16 @@ import type {
   ParagraphMetrics,
   RichText,
   TextBlock,
+  StyleDefinition,
 } from '../model/types';
-import { formatsEqual, hasFormat, normalizeRichText, PARAGRAPH_METRIC_KEYS } from '../model/rich-text';
+import { styleParagraphProps } from '../model/styles';
+import { STYLE_REF_ATTRIBUTE, styleExists } from './style-sheet';
+import {
+  hasFormat,
+  normalizeRichText,
+  PARAGRAPH_METRIC_KEYS,
+  runsCompatible,
+} from '../model/rich-text';
 import { setStyle } from './dom-style';
 import { cssLength } from './num';
 
@@ -92,7 +100,17 @@ const BLOCK_TAGS = new Set([
 // Model → HTML
 // ---------------------------------------------------------------------------
 
-export function richTextToHtml(rich: RichText): DocumentFragment {
+/**
+ * @param styles The document's style table (M23). Optional and defaulted, because every existing
+ * caller and test renders a fragment with no styles in play, and making it required would put a
+ * ceremony in front of the common case for a document that has no styles. A caller that *does* have
+ * styles must pass them: the reference attribute is only written when the id resolves, so omitting
+ * them here would silently drop every reference rather than fail.
+ */
+export function richTextToHtml(
+  rich: RichText,
+  styles: readonly StyleDefinition[] = [],
+): DocumentFragment {
   const fragment = document.createDocumentFragment();
 
   for (const block of rich.blocks) {
@@ -123,13 +141,25 @@ export function richTextToHtml(rich: RichText): DocumentFragment {
     // answer. Absent is `auto`, which is what every pre-M22 paragraph meant, so a document written
     // before this milestone renders here exactly as it always did. An explicit `auto` is written the
     // same way rather than omitted, so the attribute and the field cannot disagree.
-    paragraph.setAttribute('dir', block.dir ?? 'auto');
+    //
+    // M23: omitted entirely when the direction is *inherited* from a paragraph style. The stylesheet
+    // supplies `direction` as a real CSS declaration, and a `dir` attribute is only a presentational
+    // hint for the same property -- so leaving it in place would make the paragraph's correctness
+    // depend on which origin wins. Stating it in one place is worth more than the uniformity.
+    const inheritsDirection =
+      block.dir === undefined && styleParagraphProps(styles, block).dir !== undefined;
+    if (!inheritsDirection) paragraph.setAttribute('dir', block.dir ?? 'auto');
     if (block.align !== undefined) paragraph.style.textAlign = block.align;
 
     // M22. Logical properties throughout, so the start edge follows this paragraph's own direction
     // and there is no `if (dir === 'rtl')` anywhere in the codebase to get wrong. Writing them
     // unconditionally, like `applyTypography` does, because a partial write would leave a previous
     // paragraph's indent behind on a paragraph the user has just re-aligned.
+    //
+    // M23: only the paragraph's **own** metrics. Anything the style supplies lives in the stylesheet
+    // rule keyed by the attribute set below, because the walker reads exactly these five properties
+    // out of the inline style -- so an inherited value written here would be read back as a direct
+    // override on the next edit and detach the paragraph from its style for good.
     const metrics = block.metrics;
     setStyle(paragraph, 'text-indent', optionalLength(metrics?.textIndent));
     setStyle(paragraph, 'margin-inline-start', optionalLength(metrics?.marginStart));
@@ -137,8 +167,15 @@ export function richTextToHtml(rich: RichText): DocumentFragment {
     setStyle(paragraph, 'margin-block-start', optionalLength(metrics?.marginBefore));
     setStyle(paragraph, 'margin-block-end', optionalLength(metrics?.marginAfter));
 
+    // The reference itself. Written only when it resolves to a paragraph style, so a dangling or
+    // wrong-category `styleId` leaves nothing in the DOM to mislead a reader of the markup -- and
+    // leaves the walker nothing to mistake for an authored value.
+    if (styleExists(styles, block.styleId, 'paragraph')) {
+      paragraph.setAttribute(STYLE_REF_ATTRIBUTE, block.styleId ?? '');
+    }
+
     for (const r of block.runs) {
-      paragraph.append(runToNode(r));
+      paragraph.append(runToNode(r, styles));
     }
     fragment.append(paragraph);
   }
@@ -159,16 +196,28 @@ function optionalLength(value: number | undefined): string {
 }
 
 /** One run: its text node, wrapped once per set flag, in canonical order. */
-function runToNode(r: InlineRun): Node {
+function runToNode(r: InlineRun, styles: readonly StyleDefinition[]): Node {
   // A literal `\n`, not `<br>`: `white-space: pre-wrap` renders it. See the header.
   const text = document.createTextNode(r.text);
 
-  if (!hasFormat(r.format)) return text;
+  // M23: the style reference becomes a `<span>` *carrying the attribute*, and the style's own
+  // properties live in the stylesheet. Deliberately not `<b>`/`<i>` wrappers: those are how the
+  // walker recognises a *direct* flag, so a style's flags written as wrappers would be read back as
+  // direct overrides on the next edit and detach the run from its style permanently.
+  const styled = styleExists(styles, r.styleId, 'character');
+  let node: Node = text;
+  if (styled) {
+    const span = document.createElement('span');
+    span.setAttribute(STYLE_REF_ATTRIBUTE, r.styleId ?? '');
+    span.append(node);
+    node = span;
+  }
+
+  if (!hasFormat(r.format)) return node;
 
   // Innermost first, so the *first* flag in `WRAPPERS` ends up outermost. Iterating
   // forwards produced `<s><i><b>` — inverted, and a second HTML form for the same
   // model value, which is exactly what the canonical order exists to prevent.
-  let node: Node = text;
   for (let index = WRAPPERS.length - 1; index >= 0; index -= 1) {
     const wrapper = WRAPPERS[index];
     if (wrapper === undefined || r.format?.[wrapper.flag] !== true) continue;
@@ -210,6 +259,7 @@ export function domToRichText(root: Node): RichText {
   // from the block element and re-emitted when the paragraph is flushed.
   let dir: ParagraphDirection | undefined;
   let metrics: ParagraphMetrics | undefined;
+  let paragraphStyleId: string | undefined;
 
   /**
    * Ends the current paragraph.
@@ -225,6 +275,7 @@ export function domToRichText(root: Node): RichText {
       align = undefined;
       dir = undefined;
       metrics = undefined;
+      paragraphStyleId = undefined;
       return;
     }
     blocks.push({
@@ -232,29 +283,47 @@ export function domToRichText(root: Node): RichText {
       ...(align === undefined ? {} : { align }),
       ...(dir === undefined ? {} : { dir }),
       ...(metrics === undefined ? {} : { metrics }),
+      ...(paragraphStyleId === undefined ? {} : { styleId: paragraphStyleId }),
       runs: runs.length === 0 ? [{ text: '' }] : runs,
     });
     runs = [];
     align = undefined;
     dir = undefined;
     metrics = undefined;
+    paragraphStyleId = undefined;
   };
 
-  const appendText = (value: string, format: CharFormat): void => {
+  /**
+ * M23: `styleId` rides alongside `format` rather than inside it.
+ *
+ * A styled span carries **no** inline style and **no** tag the walker recognises as a flag, so the
+ * format arrives unchanged and only the reference is new — which is the whole point of rendering a
+ * style as an attribute rather than as wrappers. Two runs with equal formats and different styles
+ * must not merge, so the merge test is `runsCompatible` rather than `formatsEqual`.
+ */
+const appendText = (value: string, format: CharFormat, styleId: string | undefined): void => {
     const text = normalizeNewlines(value);
     if (text.length === 0) return;
 
     const previous = runs[runs.length - 1];
-    if (previous !== undefined && formatsEqual(previous.format, format)) {
-      runs[runs.length - 1] = { text: previous.text + text, ...(hasFormat(format) ? { format: { ...format } } : {}) };
+    if (previous !== undefined && runsCompatible(previous, { text, format, styleId })) {
+      runs[runs.length - 1] = {
+        text: previous.text + text,
+        ...(hasFormat(format) ? { format: { ...format } } : {}),
+        ...(styleId === undefined ? {} : { styleId }),
+      };
       return;
     }
-    runs.push({ text, ...(hasFormat(format) ? { format: { ...format } } : {}) });
+    runs.push({
+      text,
+      ...(hasFormat(format) ? { format: { ...format } } : {}),
+      ...(styleId === undefined ? {} : { styleId }),
+    });
   };
 
-  const visit = (node: Node, format: CharFormat): void => {
+  const visit = (node: Node, format: CharFormat, styleId: string | undefined): void => {
     if (node.nodeType === 3) {
-      appendText(node.nodeValue ?? '', format);
+      appendText(node.nodeValue ?? '', format, styleId);
       return;
     }
     if (node.nodeType !== 1) return;
@@ -267,7 +336,7 @@ export function domToRichText(root: Node): RichText {
     if (isBlock) flush();
 
     if (tag === 'BR') {
-      appendText('\n', format);
+      appendText('\n', format, styleId);
       return;
     }
 
@@ -279,7 +348,14 @@ export function domToRichText(root: Node): RichText {
       align = readAlign(element) ?? align;
       dir = readDirection(element) ?? dir;
       metrics = readMetrics(element) ?? metrics;
+      paragraphStyleId = readStyleRef(element) ?? paragraphStyleId;
     }
+
+    // A styled span: the reference moves inwards for its children, and nothing else about the
+    // element changes -- it has no inline style and no recognised tag, so the format arrives
+    // untouched. That is what keeps a style's properties from being read back as direct flags.
+    const innerStyleId =
+      (tag === 'SPAN' ? readStyleRef(element) : undefined) ?? styleId;
 
     // A block that contains other blocks is a *container*, not a paragraph. `<div>`
     // wrapping two `<p>`s contributes no text of its own, and flushing it would emit a
@@ -299,7 +375,7 @@ export function domToRichText(root: Node): RichText {
       // Only a *trailing* `<br>` is a placeholder. `<p>a<br>b</p>` is a real soft break
       // and must survive, so the position in the block is what decides — not the tag.
       if (isBlock && index === children.length - 1 && child.nodeName === 'BR') continue;
-      visit(child, next);
+      visit(child, next, innerStyleId);
     }
 
     if (!isBlock) return;
@@ -308,13 +384,14 @@ export function domToRichText(root: Node): RichText {
       align = undefined;
       dir = undefined;
       metrics = undefined;
+      paragraphStyleId = undefined;
     } else {
       flush(true);
     }
   };
 
   const format: CharFormat = {};
-  for (const child of Array.from(root.childNodes)) visit(child, format);
+  for (const child of Array.from(root.childNodes)) visit(child, format, undefined);
   flush();
 
   return normalizeRichText({ blocks });
@@ -431,6 +508,22 @@ function readAlign(element: Element): ParagraphAlign | undefined {
   if (value === 'center' || value === 'right' || value === 'justify') return value;
   if (value === 'left' || value === 'start') return 'left';
   return undefined;
+}
+
+/**
+ * M23: reads the style reference off an element.
+ *
+ * The **only** thing the walker learns about a style. It reads the attribute and nothing else -- no
+ * computed value, no rule text -- which is precisely why a style's properties cannot be mistaken for
+ * authored ones: the walker has no way to see them even if it wanted to.
+ *
+ * An empty attribute is read as absent, so `data-style-id=""` is "no style" rather than a reference
+ * to a style with an empty id. The parser refuses such an id anyway; this is belt and braces for a
+ * hand-edited file.
+ */
+function readStyleRef(element: Element): string | undefined {
+  const value = element.getAttribute(STYLE_REF_ATTRIBUTE)?.trim();
+  return value === undefined || value === '' ? undefined : value;
 }
 
 /**

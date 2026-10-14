@@ -26,6 +26,7 @@
 import { pageExtentPx, printPageName } from '../model/page';
 
 import { formatLength } from '../core/units/units';
+import { applyStyleSheet } from '../render/style-sheet';
 import type { Document, PageSize } from '../model/types';
 
 /**
@@ -157,6 +158,11 @@ export async function exportPdf(doc: Document): Promise<void> {
   // changes which sheet size belongs to which element, and taking this list from `doc.pages` is what
   // keeps them in step.
   applyPrintProfile(doc.pages.map((page) => page.size));
+  // M23. The stylesheet has to be current for the print as well as the screen, and this is the one
+  // place that cannot rely on the renderer having run: `exportPdf` is handed the document directly.
+  // Without it every styled paragraph would print as its direct values alone -- silently, since a
+  // paragraph with no overrides has nothing to look wrong, it just looks unstyled.
+  applyStyleSheet(doc.styles);
   await waitForImages();
   window.print();
 }

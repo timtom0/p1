@@ -90,6 +90,21 @@ export function paragraphMetricsEqual(
  * properties are needed — `commands.ts` uses this to skip no-op `setText` commands,
  * so it must not report a change for a re-ordering of equal runs.
  */
+/**
+ * Whether two runs may be merged: equal formatting **and** the same style reference (M23).
+ *
+ * Equal `format` alone stopped being sufficient the moment a run could carry a `styleId`. Two runs
+ * with identical flags but different styles are different formatting -- editing one must not change
+ * the other -- so merging them would make the distinction unrecoverable from the merged run.
+ *
+ * Lives here rather than in `styles.ts` because `styles.ts` already imports this module, and a cycle
+ * between them would make the dependency direction depend on evaluation order. A run's identity is
+ * this module's business anyway.
+ */
+export function runsCompatible(left: InlineRun, right: InlineRun): boolean {
+  return left.styleId === right.styleId && formatsEqual(left.format, right.format);
+}
+
 export function richTextEqual(a: RichText, b: RichText): boolean {
   if (a.blocks.length !== b.blocks.length) return false;
 
@@ -104,6 +119,11 @@ export function richTextEqual(a: RichText, b: RichText): boolean {
     // these out would make a paragraph-property edit record no history and be undone by nothing.
     if (left.dir !== right.dir) return false;
     if (!paragraphMetricsEqual(left.metrics, right.metrics)) return false;
+    // M23: same argument as `dir` and `metrics`, and the same reason it matters. Applying a style
+    // changes no run text and no flags on this path -- it writes `styleId` -- so a `richTextEqual`
+    // that ignored it would call every style application a no-op, record no history, and leave the
+    // user with an undo step that does nothing.
+    if (left.styleId !== right.styleId) return false;
     if (left.runs.length !== right.runs.length) return false;
 
     for (let run = 0; run < left.runs.length; run += 1) {
@@ -112,6 +132,7 @@ export function richTextEqual(a: RichText, b: RichText): boolean {
       if (leftRun === undefined || rightRun === undefined) return false;
       if (leftRun.text !== rightRun.text) return false;
       if (!formatsEqual(leftRun.format, rightRun.format)) return false;
+      if (leftRun.styleId !== rightRun.styleId) return false;
     }
   }
   return true;
@@ -131,11 +152,17 @@ export function normalizeRichText(text: RichText): RichText {
     for (const run of block.runs) {
       if (run.text.length === 0) continue;
 
+      // M23: `runsCompatible`, not `formatsEqual`. Equal formatting is no longer enough to
+      // merge, because two runs with identical flags but *different* style references are
+      // different formatting: editing one style must not change the other, so merging them would
+      // make the distinction unrecoverable. The style check is why a styled document's run
+      // boundaries survive a normalise, which is a round-trip property and not a preference.
       const previous = runs[runs.length - 1];
-      if (previous !== undefined && formatsEqual(previous.format, run.format)) {
+      if (previous !== undefined && runsCompatible(previous, run)) {
         runs[runs.length - 1] = {
           text: previous.text + run.text,
           ...(hasFormat(run.format) ? { format: { ...run.format } } : {}),
+          ...(run.styleId === undefined ? {} : { styleId: run.styleId }),
         };
         continue;
       }
@@ -143,6 +170,8 @@ export function normalizeRichText(text: RichText): RichText {
       runs.push({
         text: run.text,
         ...(hasFormat(run.format) ? { format: { ...run.format } } : {}),
+        // Beside `format` on the way out for the same reason it is beside it on the way in.
+        ...(run.styleId === undefined ? {} : { styleId: run.styleId }),
       });
     }
 
@@ -158,6 +187,9 @@ export function normalizeRichText(text: RichText): RichText {
       // spreading `block` instead is the day a property is silently dropped on every edit.
       ...(block.dir === undefined ? {} : { dir: block.dir }),
       ...(block.metrics === undefined ? {} : { metrics: { ...block.metrics } }),
+      // M23, and the note above is the reason this line exists: a fourth paragraph property added
+      // without carrying it through would be dropped on every single edit, in silence.
+      ...(block.styleId === undefined ? {} : { styleId: block.styleId }),
       runs,
     };
   });

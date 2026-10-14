@@ -231,26 +231,9 @@ export function effectiveTextStyle(node: TextFrameNode, styles: readonly StyleDe
   return merged;
 }
 
-/**
- * Whether two runs may merge: equal formatting **and** the same style reference.
- *
- * Equal `format` is not enough. Two runs with the same flags but different styles are different
- * formatting -- editing one style must not change the other -- so merging them would make the
- * reference disappear and the distinction unrecoverable.
- */
-export function runsCompatible(left: InlineRun, right: InlineRun): boolean {
-  if (left.styleId !== right.styleId) return false;
-  return charFormatsEqual(left.format, right.format);
-}
-
-const charFormatsEqual = (
-  a: CharFormat | undefined,
-  b: CharFormat | undefined,
-): boolean => {
-  const left = a ?? {};
-  const right = b ?? {};
-  return CHAR_FLAGS.every((flag) => (left[flag] === true) === (right[flag] === true));
-};
+// The run-merging predicate lives in rich-text.ts, beside formatsEqual: a run's identity is that
+// module's business, and styles.ts already imports it -- a cycle between the two would make the
+// dependency direction depend on evaluation order.
 
 /**
  * Whether a frame's effective typography is empty, so the renderer can skip a write.

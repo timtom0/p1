@@ -28,6 +28,7 @@ import type { TextFrameNode, TextStyle } from '../../model/types';
 import { localMatrix } from '../../model/transform';
 import { richTextEqual } from '../../model/rich-text';
 import { setStyle } from '../dom-style';
+import { effectiveTextStyle } from '../../model/styles';
 import { cssLength, cssMatrix, cssNumber } from '../num';
 import { richTextToHtml } from '../rich-text-html';
 import type { ObjectRenderer } from '../reconciler';
@@ -77,7 +78,14 @@ export const textFrameRenderer: ObjectRenderer<TextFrameNode> = {
     // edited is something the user can legitimately do, and CSS applying it does not
     // disturb the caret — only replacing the content would. So this is written on
     // every update, edited or not.
-    applyTypography(content, node.style);
+    //
+    // M23: the *resolved* style — `node.style` over the frame style this node references. Inline
+    // rather than a stylesheet rule, and the asymmetry with paragraphs and runs is deliberate: the
+    // walker has never read frame typography back out of the DOM (`domToRichText` reads runs and
+    // paragraph properties, nothing else), so there is no path by which an inline value here could
+    // be mistaken for an authored one. Adding a rule and a `data-style-id` would be cost without a
+    // defect to prevent.
+    applyTypography(content, effectiveTextStyle(node, ctx.document.styles));
 
     // The fence. While this frame is being edited the browser owns its content, so
     // the renderer must not write into it — doing so would move the caret, collapse
@@ -92,7 +100,7 @@ export const textFrameRenderer: ObjectRenderer<TextFrameNode> = {
     const owned = content.dataset['p1Text'] === 'true';
     if (owned && prev !== undefined && richTextEqual(prev.text, node.text)) return;
 
-    content.replaceChildren(richTextToHtml(node.text));
+    content.replaceChildren(richTextToHtml(node.text, ctx.document.styles));
   },
 
   /**
