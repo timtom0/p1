@@ -50,6 +50,7 @@ export const TINY_PNG =
 export const PRINT_THREE_PAGES = `() => ({
   formatVersion: 3, id: 'm19print', name: 'Print three pages',
   pageSetup: { fixedSize: true, defaultSize: { width: 120, height: 80, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {
     dot: {
       kind: 'image', mime: 'image/png',
@@ -119,6 +120,7 @@ export const PRINT_THREE_PAGES = `() => ({
 export const PRINT_LANDSCAPE_INCHES = `() => ({
   formatVersion: 3, id: 'm19land', name: 'Landscape inches',
   pageSetup: { fixedSize: true, defaultSize: { width: 8.5, height: 11, unit: 'in', orientation: 'landscape' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [
     {

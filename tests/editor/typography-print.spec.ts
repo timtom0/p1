@@ -33,6 +33,7 @@ import { mountFixture } from '../visual/harness';
 const TYPOGRAPHY_FIXTURE = `() => ({
   formatVersion: 3, id: 'typo', name: 'Typography',
   pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -74,6 +75,7 @@ const TYPOGRAPHY_FIXTURE = `() => ({
 const ARABIC_FIXTURE = `() => ({
   formatVersion: 3, id: 'arabic', name: 'Arabic',
   pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

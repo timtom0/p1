@@ -58,6 +58,7 @@ function fixtureWith(paragraphFields: readonly string[], text: readonly string[]
   return `() => ({
     formatVersion: 4, id: 'para', name: 'Paragraphs',
     pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',

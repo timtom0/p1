@@ -42,6 +42,7 @@ export const ROTATED_KINDS = `() => {
   return {
     formatVersion: 3, id: 'rotated', name: 'Rotated kinds',
     pageSetup: { fixedSize: true, defaultSize: { width: 900, height: 700, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {
       a1: {
         kind: 'image', mime: 'image/png',

@@ -17,6 +17,7 @@
 export const EMPTY_PAGE = `() => ({
   formatVersion: 3, id: 'empty', name: 'Empty',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -43,6 +44,7 @@ export function documentWithImages(assets: string, objects: string): string {
   return `() => ({
   formatVersion: 3, id: 'images', name: 'Images',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: ${assets},
   pages: [{
     id: 'p1', name: '1',

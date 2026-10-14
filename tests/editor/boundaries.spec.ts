@@ -496,6 +496,7 @@ const SEAM_FIXTURE = `() => {
   return {
     formatVersion: 3, id: 'seam', name: 'Seam',
     pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',
@@ -536,6 +537,7 @@ const IMAGE_FIXTURE = documentWithImages(
 const SESSION_FIXTURE = `() => ({
   formatVersion: 3, id: 'session', name: 'Session',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

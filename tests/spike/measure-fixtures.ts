@@ -19,6 +19,7 @@
 export const SIMPLE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -41,6 +42,7 @@ export const ROTATED = SIMPLE.replace('rotation: 0', 'rotation: 0.52359877559829
 export const WRAPPED = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -62,6 +64,7 @@ export const WRAPPED = `() => ({
 export const SOFT_BREAKS = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -81,6 +84,7 @@ export const SOFT_BREAKS = `() => ({
 export const MULTI_PARAGRAPH = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -104,6 +108,7 @@ export const MULTI_PARAGRAPH = `() => ({
 export const EMPTY = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -128,6 +133,7 @@ export const EMPTY = `() => ({
 export const TRAILING_SPACES = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -154,6 +160,7 @@ export const OVERFLOW = `() => {
   return {
     formatVersion: 3, id: 'f', name: 'F',
     pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',
@@ -213,6 +220,7 @@ export const HIDDEN_FRAME = SIMPLE.replace('visible: true', 'visible: false');
 export const UNSTYLED = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

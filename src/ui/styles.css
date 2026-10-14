@@ -1123,3 +1123,243 @@ Pages panel (M20)
   gap: 8px;
   margin-top: 4px;
 }
+/* ---------------------------------------------------------------------------
+   M23: styles
+
+   The style panel, the two confirmation dialogs, the definition editor, and
+   the toast.
+
+   The panel's layout rule is that the reference and the overrides are one
+   thing, so they live in one block with no rule between them: a user editing
+   an indent needs to see, without moving their eyes, which style is
+   supplying the others.
+   --------------------------------------------------------------------------- */
+
+.p1-styles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.p1-styles__tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.p1-styles__tabs button {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 11px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.p1-styles__tabs button[data-active='true'] {
+  background: var(--accent);
+  color: #dce4ff;
+  border-color: var(--accent);
+}
+
+.p1-styles__picker,
+.p1-styles__manage {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.p1-styles__select,
+.p1-styles__rename {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+}
+
+.p1-styles button {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: inherit;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.p1-styles button:disabled,
+.p1-styles input:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
+ * The two selection actions are the pair the milestone exists to keep apart,
+ * so they are given equal weight and adjacent placement rather than one of
+ * them being demoted to a text link. Which one changes the object's appearance
+ * is stated on the button's own tooltip rather than only in the dialog, since
+ * the tooltip is the thing that is there when the dialog is not.
+ */
+.p1-styles__action {
+  flex: 1;
+  white-space: nowrap;
+}
+
+/* --- the dialogs --------------------------------------------------------- */
+
+.p1-style-dialog,
+.p1-style-editor {
+  min-width: 420px;
+  max-width: 560px;
+  padding: 0;
+  color: inherit;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+}
+
+.p1-style-dialog::backdrop,
+.p1-style-editor::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.p1-style-dialog__form,
+.p1-style-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.p1-style-dialog__title {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.p1-style-dialog__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.p1-style-dialog__text--aside {
+  opacity: 0.75;
+  font-size: 11px;
+}
+
+/*
+ * The two deletion choices each carry their own consequence paragraph, and the
+ * layout puts the consequence directly under the button that produces it. The
+ * alternative -- one shared paragraph above both -- is the arrangement that
+ * makes a user read the size consequence while looking at the button that does
+ * not have it.
+ */
+.p1-style-dialog__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.p1-style-dialog__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 5px;
+}
+
+.p1-style-dialog__choice-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.p1-style-dialog__consequence {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.p1-style-dialog__actions,
+.p1-setup__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.p1-style-dialog__actions button,
+.p1-style-editor button,
+.p1-style-dialog__choice button {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.p1-style-editor__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* --- the toast ----------------------------------------------------------- */
+
+.p1-toast-region {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.p1-toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 520px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--chrome-bg);
+  background: var(--chrome-fg);
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
+  pointer-events: auto;
+}
+
+.p1-toast__text {
+  line-height: 1.4;
+}
+
+.p1-toast__action {
+  flex: none;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentcolor;
+  border-radius: 4px;
+  cursor: pointer;
+}

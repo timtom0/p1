@@ -24,6 +24,7 @@ import { mountFixture } from '../visual/harness';
 const THREE_RECTS = `() => ({
   formatVersion: 3, id: 'gdoc', name: 'Groups',
   pageSetup: { fixedSize: true, defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -53,6 +54,7 @@ const THREE_RECTS = `() => ({
 const GROUPED = `() => ({
   formatVersion: 3, id: 'gdoc', name: 'Groups',
   pageSetup: { fixedSize: true, defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

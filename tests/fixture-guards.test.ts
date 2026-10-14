@@ -140,6 +140,36 @@ function findUnsizedPages(file: string): string[] {
   return found;
 }
 
+/**
+ * `path:line` for each literal in `literals` whose body does not mention `field`.
+ *
+ * ## Why this is a function and not the loop it replaced
+ *
+ * Because the windowing is the subtle part and it is exactly what broke once already. The search
+ * runs **forward from the literal's own `pageSetup`, never backward**, and ends at the next
+ * `pageSetup` in the file. A fixed line count is a guess about formatting: one that was three lines
+ * long passed until a fixture wrote `pageSetup` as a five-line block, and it then silently checked
+ * nothing at all -- a guard that stops guarding looks exactly like a guard that passes.
+ *
+ * Two fields need that window now, and two copies of it would drift.
+ */
+function fieldsMissingFrom(literals: readonly DocumentLiteral[], field: string): string[] {
+  const missing: string[] = [];
+  for (const literal of literals) {
+    const source = readFileSync(literal.file, 'utf8');
+    const next = source.indexOf('pageSetup:', literal.after);
+    const end = next === -1 ? source.length : next;
+    if (!source.slice(literal.after, end).includes(field)) {
+      missing.push(`${testRelativePath(literal.file)}:${literal.line}`);
+    }
+  }
+  return missing;
+}
+
+const MISSING_FIELD_MESSAGE = (field: string, addition: string): string =>
+  `these document literals omit \`${field}\`, so the app receives a document that is not a ` +
+  `\`Document\`. Add \`${addition}\` after the \`pageSetup\` line.`;
+
 describe('injected document fixtures', () => {
   const literals = findDocumentLiterals();
 
@@ -150,26 +180,20 @@ describe('injected document fixtures', () => {
   });
 
   it('every document literal declares `assets`', () => {
-    const missing: string[] = [];
-    for (const literal of literals) {
-      const source = readFileSync(literal.file, 'utf8');
-      // Forward from this literal's own `pageSetup`, never backward. A fixed line count is a
-      // guess about formatting: one that was three lines long passed until a fixture wrote
-      // `pageSetup` as a five-line block, and it silently stopped checking anything. The run
-      // ends at the next literal in the file, so this cannot reach into a neighbouring
-      // document and find an `assets` that is not this one's.
-      const next = source.indexOf('pageSetup:', literal.after);
-      const end = next === -1 ? source.length : next;
-      if (!source.slice(literal.after, end).includes('assets')) {
-        missing.push(`${literal.file}:${literal.line}`);
-      }
-    }
-    expect(
-      missing,
-      'these document literals omit `assets`, so the app receives a document that is not a ' +
-        '`Document`. Add `assets: {}` (or the records the fixture needs) after the ' +
-        '`pageSetup` line.',
-    ).toEqual([]);
+    expect(fieldsMissingFrom(literals, 'assets'), MISSING_FIELD_MESSAGE('assets', 'assets: {}')).toEqual([]);
+  });
+
+  it('every document literal declares `styles`', () => {
+    // The M23 hole, and the same shape as the M6/M7 one in this file's header. `Document.styles`
+    // is required, the fixture cast is unchecked, and all seventy literals written before format v5
+    // had none of them. That stayed invisible only until `applyStyleSheet` reached the render path
+    // and iterated the field -- at which point every suite in the browser run failed to boot at
+    // once, each pointing at its own test, for a missing array in a document literal sixty files
+    // away.
+    //
+    // `styles: []` is the right default rather than a sentinel: a document with no style
+    // definitions is an ordinary document, and it is what the factory produces.
+    expect(fieldsMissingFrom(literals, 'styles'), MISSING_FIELD_MESSAGE('styles', 'styles: []')).toEqual([]);
   });
 
   it('every page literal declares its own `size`', () => {

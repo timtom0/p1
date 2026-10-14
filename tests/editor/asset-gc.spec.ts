@@ -35,6 +35,7 @@ const FIXTURE = `() => {
   return {
     formatVersion: 3, id: 'gcdot', name: 'GC',
     pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {
       asset_used: record('USED'),
       asset_nested: record('NESTED'),

@@ -262,6 +262,7 @@ test.describe('save and reopen', () => {
     const source = `() => ({
       formatVersion: 3, id: 'multi', name: 'Multi',
       pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      styles: [],
       assets: {},
       pages: [
         { id: 'p1', name: 'One', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
@@ -340,6 +341,7 @@ test.describe('save and reopen', () => {
     const source = `() => ({
       formatVersion: 3, id: 'kinds', name: 'Kinds',
       pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
         { type: 'shape', id: 'n_rect', name: 'Rect', transform: { x: 20, y: 20, width: 60, height: 40, rotation: 0, scaleX: 1, scaleY: 1 },
@@ -381,6 +383,7 @@ test.describe('save and reopen', () => {
     const source = `() => ({
       formatVersion: 3, id: 'xf', name: 'Transformed',
       pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
         { type: 'shape', id: 'n_rot', name: 'Rotated', transform: { x: 40, y: 40, width: 80, height: 40, rotation: 0.5235987755982988, scaleX: 1.25, scaleY: 0.75 },
@@ -492,6 +495,7 @@ test.describe('assets', () => {
       id: 'doc_ext',
       name: 'External',
       pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      styles: [],
       assets: {
         asset_x: {
           kind: 'image',
@@ -572,6 +576,7 @@ test.describe('refused documents', () => {
         defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
         resizeBehaviour: 'crop',
       },
+      styles: [],
       assets: {},
       pages: [
         {

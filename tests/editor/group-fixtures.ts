@@ -49,6 +49,7 @@ export const GROUPS = `() => {
     id: 'grouped',
     name: 'Grouped kinds',
     pageSetup: { fixedSize: true, defaultSize: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {
       a1: {
         kind: 'image', mime: 'image/png',

@@ -39,6 +39,7 @@ import { mountFixture } from '../visual/harness';
 export const TWO_WELL_SEPARATED = `() => ({
   formatVersion: 3, id: 'm17sep', name: 'Separated',
   pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -73,6 +74,7 @@ export const TWO_WELL_SEPARATED = `() => ({
 export const NEAR_PAGE_LEFT = `() => ({
   formatVersion: 3, id: 'm17page', name: 'Near page edge',
   pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -105,6 +107,7 @@ export const NEAR_PAGE_LEFT = `() => ({
 export const NESTED_ROTATED_CHILD = `() => ({
   formatVersion: 3, id: 'm17nested', name: 'Nested rotated',
   pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 420, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -141,6 +144,7 @@ export const NESTED_ROTATED_CHILD = `() => ({
 export const THREE_FOR_MULTI = `() => ({
   formatVersion: 3, id: 'm17multi', name: 'Multi selection',
   pageSetup: { fixedSize: true, defaultSize: { width: 620, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -221,6 +225,7 @@ export async function mountThreeForMulti(page: Page): Promise<void> {
 export const ZOOM_INVARIANCE = `() => ({
   formatVersion: 3, id: 'm17zoom', name: 'Zoom invariance',
   pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 400, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

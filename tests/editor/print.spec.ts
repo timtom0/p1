@@ -290,6 +290,7 @@ test.describe('the sheet is the document page', () => {
           id: 'other',
           name: 'Other',
           pageSetup: { fixedSize: true, defaultSize: { width: 5, height: 7, unit: 'in', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          styles: [],
           assets: {},
           pages: [
             {

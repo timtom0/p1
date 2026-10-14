@@ -40,6 +40,8 @@ import { findNode } from '../editor/selection';
 import type { CharFlag } from '../model/rich-text';
 import { formatLength, parseLength as parseLengthPx } from '../core/units/units';
 import type { PhysicalUnit } from '../core/units/units';
+import { createStylesPanel } from './styles-panel';
+import { registerStyleActions, styleUi } from './style-ui';
 
 interface FieldSpec {
   key: keyof TransformPatch;
@@ -59,6 +61,14 @@ const FIELDS: readonly FieldSpec[] = [
 export interface Inspector {
   /** Repaints from the current selection. Cheap; called on every selection change. */
   sync(): void;
+  /**
+   * Releases anything this mount registered outside itself.
+   *
+   * Only the M23 style-panel registration today. The panel publishes a dialog-free action for the
+   * keyboard path, and a mount that goes away without releasing it would leave a closure acting on a
+   * document nobody is looking at any more.
+   */
+  dispose(): void;
 }
 
 /**
@@ -654,6 +664,34 @@ export function mountInspector(
   textHeader.className = 'p1-inspector-subheader';
   textHeader.textContent = 'Text';
   textSection.append(textHeader);
+
+  /**
+   * M23's style panel, inside the text section rather than beside it.
+   *
+   * Inside, because it is meaningless without it: the category tabs name the same properties the
+   * text fields below edit, and "the paragraph style" means nothing if the panel offering it is
+   * shown for a rectangle. It goes above the fields so the reference is visible while the override
+   * is being typed -- that pairing is the thing the resolution rule makes non-obvious, and showing
+   * them in one panel is what makes direct-beats-style legible rather than something to memorise.
+   */
+  const stylesPanel = createStylesPanel(
+    editor,
+    store,
+    styleUi().dialogs,
+    styleUi().styleEditor,
+    styleUi().toaster,
+    unit,
+  );
+  textSection.append(stylesPanel.root);
+
+  // The shortcut path needs the panel's dialog-free action, and the panel is rebuilt on every mount,
+  // so the registration hands back its own teardown. A stale registration would act on a document
+  // the user is no longer looking at.
+  const unregisterStyleActions = registerStyleActions((mode) => {
+    const message = stylesPanel.runImmediate(mode);
+    if (message !== null) styleUi().toaster.show(message, { action: { label: 'Undo', run: () => editor.undo() } });
+    return message;
+  });
 
   const textGrid = document.createElement('div');
   textGrid.className = 'p1-inspector-grid';
@@ -1251,6 +1289,7 @@ export function mountInspector(
       input.value = shown;
       input.dataset['shown'] = shown;
     }
+    stylesPanel.sync();
     metricClear.disabled = !anyMetric;
 
     // Format state has two sources, and the caller should not have to know which:
@@ -1319,7 +1358,7 @@ export function mountInspector(
   }
 
   sync();
-  return { sync };
+  return { sync, dispose: unregisterStyleActions };
 }
 
 /**

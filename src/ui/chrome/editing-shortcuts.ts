@@ -17,6 +17,7 @@
  * object and pressing "1" in an inspector field would resize something.
  */
 
+import { runStyleShortcut, registerUndo } from '../style-ui';
 import type { Editor } from '../../editor/editor';
 import type { ShapeKind } from '../../model/types';
 import type { CharFlag } from '../../model/rich-text';
@@ -195,6 +196,32 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
       return;
     }
 
+    // ---- M23: the selection-level style actions ------------------------------
+    //
+    // **No confirmation on this path**, deliberately, and the contrast with the inspector's buttons
+    // is the design rather than an inconsistency: those confirm because the user is looking at a
+    // panel and has time to read two paragraphs, while a shortcut that opened a modal would make
+    // the routine case pay for the uncommon mistake. What replaces the dialog is the toast, which
+    // says which reading was taken -- and Unlink and Remove differ only in what happens to
+    // properties that are invisible on the object, so "what happened" is genuinely useful
+    // information rather than a confirmation in another costume.
+    //
+    // `Alt` is required for both, and neither chord is a browser or OS binding. Ctrl+U opens
+    // view-source, Ctrl+Shift+U is straight-quotes on Linux, and Ctrl+R reloads: all three would
+    // have been worse than nothing. Ctrl+Alt+U and Ctrl+Alt+R are unbound everywhere, which is the
+    // same reasoning `shortcuts.ts` applies to every chord it takes.
+    if (command && event.altKey && !event.shiftKey) {
+      const mode = STYLE_ACTION_KEYS[event.key.toLowerCase()];
+      if (mode !== undefined) {
+        if (isTypingTarget(event.target)) return;
+        // Only claim the keystroke once something will actually happen. A shortcut that swallows
+        // Ctrl+Alt+U and does nothing is worse than one that was never bound.
+        if (!runStyleShortcut(mode)) return;
+        event.preventDefault();
+        return;
+      }
+    }
+
     // ---- character formatting ----------------------------------------------
     //
     if (event.key === 'Escape') {
@@ -282,12 +309,30 @@ export function bindEditingShortcuts({ editor, nudge = 1 }: EditingShortcutOptio
     editor.nudge(ids, delta, event.altKey);
   };
 
+  // M23. The toast's Undo button needs the editor this binder already has; registering it here keeps
+  // style-ui free of any dependency on the editor layer, and means the one Undo in the app is
+  // Editor.undo -- the same call Ctrl+Z and the toolbar button make.
+  registerUndo(() => editor.undo());
+
   window.addEventListener('keydown', onKeyDown);
   return () => window.removeEventListener('keydown', onKeyDown);
 }
 
 /** Shift-nudges ten times further, matching every other editor. */
 const NUDGE_MULTIPLIER = 10;
+
+/**
+ * M23's two selection-level style actions, on the chords that are free on every platform.
+ *
+ * `u` for Unlink and `r` for Remove: the obvious mnemonics, on a modifier combination that no
+ * browser and no desktop environment has claimed. Alt is what makes it possible -- `Ctrl+U` is
+ * view-source and `Ctrl+R` is reload, and an editor that takes either one breaks the user to add a
+ * cosmetic action.
+ */
+const STYLE_ACTION_KEYS: Readonly<Record<string, 'unlink' | 'remove'>> = {
+  u: 'unlink',
+  r: 'remove',
+};
 
 /**
  * The tool each plain letter arms, matching the toolbar buttons' `title` attributes.

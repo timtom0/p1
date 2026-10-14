@@ -65,6 +65,7 @@ function stackFixture(count: number): string {
   return `() => ({
     formatVersion: 3, id: 'doc_stack', name: 'stack',
     pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [${pages}],
   })`;
@@ -695,6 +696,7 @@ test('two-page stack renders both pages', async ({ page }) => {
       return {
         formatVersion: 3, id: 'doc_two', name: 'two pages',
         pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        styles: [],
         assets: {},
         pages: [
           { id: 'pg_1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' },

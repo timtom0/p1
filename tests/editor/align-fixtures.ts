@@ -51,6 +51,7 @@ import { mountFixture } from '../visual/harness';
 export const ROTATED_GROUP_ONE_CHILD = `() => ({
   formatVersion: 3, id: 'm16rot', name: 'Rotated group',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -90,6 +91,7 @@ export const ROTATED_GROUP_ONE_CHILD = `() => ({
 export const NESTED_GROUP = `() => ({
   formatVersion: 3, id: 'm16nested', name: 'Nested groups',
   pageSetup: { fixedSize: true, defaultSize: { width: 560, height: 420, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -136,6 +138,7 @@ export const NESTED_GROUP = `() => ({
 export const ROTATED_SIZED = `() => ({
   formatVersion: 3, id: 'm16rot45', name: 'Rotated sizing',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 450, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -165,6 +168,7 @@ export const ROTATED_SIZED = `() => ({
 export const ROTATED_GROUP_MEMBERS = `() => ({
   formatVersion: 3, id: 'm16rotgrp', name: 'Rotated group members',
   pageSetup: { fixedSize: true, defaultSize: { width: 600, height: 450, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -206,6 +210,7 @@ export const ROTATED_GROUP_MEMBERS = `() => ({
 export const THREE_SIZED_RECTS = `() => ({
   formatVersion: 3, id: 'm16sized', name: 'Three sized rects',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -242,6 +247,7 @@ export const THREE_SIZED_RECTS = `() => ({
 export const ALREADY_DISTRIBUTED = `() => ({
   formatVersion: 3, id: 'm16dist', name: 'Already distributed',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -278,6 +284,7 @@ export const ALREADY_DISTRIBUTED = `() => ({
 export const OVERLAPPING_RECTS = `() => ({
   formatVersion: 3, id: 'm16overlap', name: 'Overlapping rects',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -312,6 +319,7 @@ export const OVERLAPPING_RECTS = `() => ({
 export const TWO_RECTS = `() => ({
   formatVersion: 3, id: 'm16two', name: 'Two rects',
   pageSetup: { fixedSize: true, defaultSize: { width: 500, height: 400, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',

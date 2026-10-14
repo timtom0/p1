@@ -62,6 +62,7 @@ function fixtureFor(text: string): string {
   return `() => ({
     formatVersion: 3, id: 'bidi', name: 'Bidi',
     pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',
@@ -178,6 +179,7 @@ test.describe('bidi and shaping survive the model', () => {
       `() => ({
         formatVersion: 3, id: 'mix', name: 'Mixed',
         pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        styles: [],
         assets: {},
         pages: [{
           id: 'p1', name: '1',

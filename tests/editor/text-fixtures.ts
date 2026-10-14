@@ -25,6 +25,7 @@ export const EMPTY_IDS = {
 export const TEXT_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -59,6 +60,7 @@ export const TEXT_FIXTURE = `() => ({
 export const EMPTY_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -86,6 +88,7 @@ export const EMPTY_FIXTURE = `() => ({
 export const BLANK_LINE_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -113,6 +116,7 @@ export const OVERFLOW_FIXTURE = `() => {
   return {
     formatVersion: 3, id: 'f', name: 'F',
     pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',

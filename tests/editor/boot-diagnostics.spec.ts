@@ -121,6 +121,7 @@ test.describe('the counts are named for what they count', () => {
       `() => ({
         formatVersion: 3, id: 'diag', name: 'Diag',
         pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        styles: [],
         assets: {},
         pages: [{
           id: 'p1', name: '1',
@@ -269,6 +270,7 @@ test.describe('the readiness condition cannot be satisfied by static HTML', () =
       `() => ({
         formatVersion: 3, id: 'broken', name: 'Broken',
         pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        styles: [],
         assets: {},
         pages: [
           // No size, which is what M20 made required.
@@ -302,6 +304,7 @@ test.describe('the readiness condition cannot be satisfied by static HTML', () =
         return {
           formatVersion: 3, id: 'noisy', name: 'Noisy',
           pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          styles: [],
           assets: {},
           pages: [{ id: 'p1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [] }],
         };

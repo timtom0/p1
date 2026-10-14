@@ -41,6 +41,7 @@ export const SHAPES = `() => {
   return {
     formatVersion: 3, id: 'shapes', name: 'Shapes',
     pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    styles: [],
     assets: {},
     pages: [{
       id: 'p1', name: '1',
@@ -129,6 +130,7 @@ export const SHAPES = `() => {
 export const EMPTY_PAGE = `() => ({
   formatVersion: 3, id: 'empty', name: 'Empty',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
@@ -142,6 +144,7 @@ export const EMPTY_PAGE = `() => ({
 export const TWO_RECTS = `() => ({
   formatVersion: 3, id: 'two', name: 'Two',
   pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  styles: [],
   assets: {},
   pages: [{
     id: 'p1', name: '1',
