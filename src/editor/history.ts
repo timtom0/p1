@@ -290,7 +290,7 @@ export class History {
     // cheap check has already failed, so the cost is one walk of a document that genuinely
     // changed, and it cannot drop a real entry: an entry whose result is canonically equal
     // to where it started has nothing to undo.
-    // mutation: an out-and-back gesture lands on the history
+    if (documentsEqual(open.before, after)) return;
 
     this.push({ before: open.before, command, label: open.label });
   }
