@@ -43,12 +43,13 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M20** Page management | **Done - per-page dimensions, page commands, mixed-size PDF** - see [ADR 0019](adr/0019-per-page-dimensions.md) |
 | **M21** Typography foundation | **Done - the existing controls made reachable and real** - see [ADR 0003 amendments](adr/0003-production-text-model.md#amendments). `fontFamily` control added; the unset state of every `TextStyle` property made reachable; `Ctrl+B/I/U` bound outside a text session; `dir="auto"` per paragraph |
 | **M22** Advanced typography | **Done - authored direction, paragraph indents, super/subscript** - see [ADR 0003 amendments](adr/0003-production-text-model.md#m22--authored-direction-indents-and-super--subscript) and [M22 notes](#m22-implementation-notes--advanced-typography). Format **v4**. `ParagraphBlock.dir` and `.metrics`; five metrics mapped to CSS *logical* properties, so RTL correctness is a consequence of CSS rather than of a branch; `CharFormat.super`/`.sub`; the DOM walker reads all of it back |
+| **M23** Reusable styles | **Done - document-local styles with live references, and remove/unlink kept apart** - see [M23 notes](#m23-implementation-notes--reusable-document-local-styles) and [ADR 0003 amendments](adr/0003-production-text-model.md#m23--reusable-document-local-styles). |
 | M20+ | Not started |
 
-Twenty-six known limitations are recorded rather than hidden. Four of them are now closed and struck
+Twenty-seven known limitations are recorded rather than hidden. Five of them are now closed and struck
 through rather than deleted - the selection outline in M11, group interaction in M13, orphaned assets in
-M14, and authored paragraph direction in M22 - so a reader can see what was believed and when it
-stopped being true. None of the open twenty-two blocks the next milestone:
+M14, authored paragraph direction in M22, and reusable styles in M23 - so a reader can see what was
+believed and when it stopped being true. None of the open twenty-two blocks the next milestone:
 
 - **Lost external writes.** A model write to a frame being edited is deferred and
   replayed on session exit (see ADR 0001 finding 2). M3 widened the hook from text to
@@ -146,13 +147,32 @@ stopped being true. None of the open twenty-two blocks the next milestone:
   neighbouring paragraph", which a fixed-size text frame cannot honour safely, so the parser refuses it
   by name rather than clamping. The split is the model speaking, and `parseParagraphMetrics` is where
   it lives.
-- **No reusable styles, tab stops, keep-with-next or per-paragraph line-height.** Deliberate, and each
-  for a stated reason. Reusable styles are M23 by instruction, and want the property model stable
-  first. Tab stops are disproportionate as a representation *and* as an editing affordance.
+- ~~**No reusable styles.**~~ **Fixed in M23.** The property model was made stable first, deliberately:
+  M22 added the direction and the indents so that a paragraph style would have a *complete* set of
+  properties to supply rather than half of one. `Document.styles` now holds document-local
+  definitions, `styleId` is a stable id at all three reference sites, and every resolution is
+  per-property: **direct wins, then the style, then the existing default.** See the [M23 notes](#m23-implementation-notes--reusable-document-local-styles)
+  for the three operations and why they differ. Two M23-specific limits remain and are recorded
+  below: no style inheritance, and no unresolved-reference repair.
+- **No tab stops, keep-with-next or per-paragraph line-height.** Deliberate, and each for a stated
+  reason. Tab stops are disproportionate as a representation *and* as an editing affordance.
   `keepWithNext` / `keepLinesTogether` need pagination, which a fixed-size frame has no way to honour —
   stored and silently ignored would be worse than absent. Per-paragraph `lineHeight` duplicates
   frame-level `lineHeight` without a layout engine that could justify the duplication, so it is
   deferred with the rest of the measurement work below.
+- **Styles do not inherit, and the model says so rather than leaving room for it.** A style resolves
+  to its own properties and to the application's defaults; there is no parent. That is the whole of
+  the resolution rule, and adding a hierarchy later means *adding a term* to it rather than replacing
+  it. What is deliberately absent is the adjacent machinery a cascade drags in - expressions,
+  variables, computed values, specificity between competing rules - because each would make "what
+  does this resolve to" a function of more than `(object, style)`, and the property-level resolution
+  this milestone rests on is only checkable while that is true.
+- **An unresolved style reference is preserved, never repaired.** A document naming a style it does
+  not carry loads, renders the object unstyled, and keeps the id through the next save - so a build
+  that *does* understand the style can still resolve it, and a hand-edit is not silently overwritten.
+  The cost is real and recorded: the panel shows "Missing paragraph style" rather than pretending
+  the object has none, and nothing offers to rebind or delete the dangling reference. Repair is a
+  deliberate user action, not a load-time side effect.
 - **Arabic shaping is the browser's, and that is a commitment rather than a gap.** No custom bidi
   algorithm and no shaping engine; the model stores **logical** order and Chromium applies UAX#9 and
   the Arabic shaping rules. Nothing here promises professional Arabic typesetting — kerning,
@@ -4659,3 +4679,97 @@ Two keyboard-reading rules that look contradictory and are not. Everything binds
 exception: Ctrl+Shift+. and Ctrl+Shift+, are defined by their *punctuation keys*, and Shift+`.` produces
 a different `key` on every layout, so those read `event.code` — otherwise they would work on a US
 keyboard and nowhere else.
+
+## M23 implementation notes - Reusable document-local styles
+
+Format **v5**. `Document.styles` carries the definitions; `styleId` is a reference at all three
+sites, and it is an **id, never a name** - which is what makes renaming unable to break anything.
+
+### The one rule everything else serves
+
+**A resolved value is never written down.** Not by the renderer, not by the DOM-to-model walker, not
+by saving. The only two operations that materialize are explicit user commands, both undoable.
+
+The reason is a specific and quiet failure. If a style's values were rendered as inline styles, the
+walker would read `text-align`, the logical margins and `<b>`/`<i>` back out of the DOM on the first
+keystroke and store them as **direct overrides**. Nothing would look wrong. The document would grow.
+And editing the style would quietly stop working for that object, because the object had silently
+detached itself. So inherited values go into a **document-scoped CSS rule** keyed by `data-style-id`,
+and the element carries only that attribute - see `src/render/style-sheet.ts`.
+
+Frame styles stay **inline**, and that asymmetry is deliberate rather than an oversight:
+`domToRichText` has never read frame typography back, so there is no path by which a style-derived
+frame value could be mistaken for authored. The call site says so.
+
+### Three operations, and why they are three
+
+| | Reaches | Materializes | Result |
+|---|---|---|---|
+| **Remove style** (selection) | selected objects | **no** | direct overrides kept; inherited props fall back to the defaults; document gets smaller |
+| **Unlink style** (selection) | selected objects | **yes** | effective values written down as direct; appearance identical; document gets bigger |
+| **Delete style** (definition) | **every reference in the document** | with *unlink*, yes | the user must choose, and Cancel is a real option |
+
+`deleteStyle` is document-wide because it removes the definition, and a dangling reference is the one
+outcome neither operation permits. The two selection actions are not, because an action that swept up
+every other user of a style would change objects the user did not select. That difference in **reach**
+is why they are three commands rather than one with a flag.
+
+Neither dialog ever defaults to the option that discards formatting. The temptation is a convenience
+one - make the common case one keystroke - but the common case is not knowable in advance: the user
+who presses Remove on a title they are about to restyle and the user who presses it on one they have
+already restyled want opposite outcomes.
+
+Undo restores the **exact** definition, references and direct values, because history stores the
+before-image. Nothing is reconstructed.
+
+### Resolution, per property
+
+`src/model/styles.ts`, and the whole of it is: **direct wins, then the style, then the default.**
+Storing the reference *separately* from the object's own values is what makes one override fail to
+block inheritance of the others, and key-by-key metric merging is why overriding `marginStart` does
+not discard `marginAfter`.
+
+`StyleDefinition` is a **discriminated union**, not one property bag. A character style carrying
+`align` has nothing to align, and the union makes "a run may only name a character style" a
+typecheck rather than a runtime check.
+
+### Persistence
+
+v5 with an explicit migration and tests in both directions. An unresolved reference is **accepted and
+preserved**: repairing it at load would write a change nobody asked for and lose the link for a build
+that *does* understand it.
+
+### What the browser suite found that nothing else could
+
+Three defects, all of the same shape - *a gate that reported clean because it failed to parse its
+own output* or *a rule that worked for half its declarations*:
+
+1. Every injected fixture had been a boot failure since v5 added the field, because the fixture cast
+   is unchecked. 733 browser tests, all failing, each pointing at its own spec. Fixed by extending the
+   fixture guard that exists for exactly this - and that guard then had to be tightened twice: once
+   because its `styles` check was satisfied by the word "stylesheet" in a doc comment, and once
+   because a repair script corrupted forty literals in silence.
+2. **A paragraph style's logical margin never rendered.** `.p1-text-content p { margin: 0 }` is
+   specificity (0,1,1); a bare `[data-style-id]` selector is (0,1,0) and loses. So `marginStart` and
+   `marginEnd` computed to zero *silently*, while the same rule's `text-align` and `direction` applied
+   perfectly. Half the style demonstrably worked, which is why no unit test could see it. It presented
+   as **"unlink moved the text"**, which is the one thing unlink must never do.
+3. Selection-level **Remove was doing Unlink** - `unlinkNode` hardcoded `'unlink'` in its body. The
+   destructive action was silently *preserving* formatting the user had asked to lose, which is the
+   worst direction for a bug to fail in: least visible to the person who hit it, most visible later
+   as "the button did nothing".
+
+The general lesson, recorded because it recurred: **assert rendered geometry, not just model state.**
+"Unlink preserves appearance" is now `expect(Math.abs(after.x - before.x)).toBeLessThan(2)` on where
+the glyphs landed, and "remove discards inherited values" is the same measurement expecting it to move
+*back*. Both read rectangles, and both fail if the two commands are ever swapped.
+
+### Undo and the shortcut path
+
+`Ctrl+Alt+U` / `Ctrl+Alt+R`, both unbound on every platform, execute **immediately with no dialog** and
+report in a toast that offers `Editor.undo` - the same call Ctrl+Z and the toolbar button make. There
+is no second undo mechanism. All categories are batched into one history entry, so the gesture is one
+Ctrl+Z rather than three. The shortcut claims the keystroke only once something will actually happen.
+
+The dialogs are for the *panel*, where a user is looking at two paragraphs of explanation and has time
+to read them; a modal on every keystroke would make the routine case pay for the uncommon mistake.

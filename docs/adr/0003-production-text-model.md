@@ -536,6 +536,61 @@ The fix is in the UI only. An empty field now commits `undefined` through the ex
 to no style at all — the behaviour this ADR always specified. The distinction that matters is kept:
 an empty field is a deliberate act, `0.` is a typo, and only the second reverts.
 
+
+### M23 — reusable document-local styles
+
+This ADR's round-trip property is *weaker* than it looks once a style exists, and the amendment is
+about how it is kept strong.
+
+**The property, restated.** Round-tripping must preserve a **reference** and must **not** introduce
+values the author did not write. With a style table those are two different obligations. A paragraph
+carrying `styleId: sty_quote` must keep the id through an editing session, and its own `align`, `dir`
+and `metrics` must come back exactly as they were — *absent*, if they were absent, because the style
+supplies them.
+
+**The failure this design has to prevent.** If a style's values were rendered as inline styles, the
+walker in *HTML → model* would read them back and store them as **direct overrides**. Nothing would
+look wrong, the document would grow, and editing the style would quietly stop affecting that object —
+it had detached itself, invisibly, on the first keystroke.
+
+So inherited values go into a **document-scoped CSS rule** keyed by `data-style-id`, and the element
+carries only that attribute. The walker's existing property reads (`text-align`, the logical margins,
+`<b>`/`<i>`/`<sup>`) then find nothing to read back. `styleParagraphProps` exists solely to hand the
+renderer *exactly* the inherited share, for that reason.
+
+**Frame styles stay inline**, and the asymmetry is deliberate: `domToRichText` has never read frame
+typography back, so there is no path by which a style-derived frame value could be mistaken for
+authored. The call site records it, so a future reader does not "fix" it into a symmetry.
+
+**Two operations, one of which writes.** *Remove* drops the reference and keeps the object's own
+values; what the style was supplying falls back to the defaults, and the document gets smaller.
+*Unlink* resolves and writes the effective values down before dropping the reference, so the appearance
+is preserved and the document gets bigger. Nothing else in the system may materialize. Both are undoable
+and both restore the exact prior state, because history holds the before-image rather than
+reconstructing one.
+
+**And the finding that makes the round-trip property worth re-asserting.** The stylesheet's first
+version lost to `.p1-text-content p { margin: 0 }` on specificity, so every logical margin a style
+supplied computed to zero — while the same rule's `text-align` and `direction` applied perfectly. Half
+the style demonstrably worked, so "the stylesheet works" looked established. It surfaced as *unlink
+moved the text*, which is the one thing unlink must never do.
+
+That is the amendment's actual lesson, and it is about this ADR's central claim rather than about
+styles: **a projection that fails partially is harder to detect than one that fails wholly**, because
+the part that works proves the mechanism works. `tests/editor/styles.spec.ts` therefore asserts
+rendered geometry — `Math.abs(after.x - before.x) < 2` — rather than model state, because a model read
+passes for an implementation that got the two operations the wrong way round.
+
+### M23 — `styleId` is an id, and a rename cannot break a reference
+
+References are ids; names are labels. `renameStyle` touches `name` and nothing else, which is the whole
+mechanism. Two styles may share a name, and the panel lists ids rather than names for exactly that
+reason — a name-keyed reference is a rename away from being a dangling one.
+
+An unresolved id is **preserved, not repaired**: the document loads, the object renders unstyled, and
+the id survives the next save, so a build that *does* understand the style can still resolve it. The
+cost is stated in the architecture limitations rather than hidden — the panel says "Missing paragraph
+style" rather than reporting the object as having none.
 ## Verification
 
 | Claim | Where |
@@ -558,5 +613,10 @@ an empty field is a deliberate act, `0.` is a typo, and only the second reverts.
 | Bidi, shaping and font fallback are not damaged (M21) | `tests/editor/typography-bidi.spec.ts` |
 | Every advertised formatting shortcut works, and hijacks nothing (M21) | `tests/editor/typography-shortcuts.spec.ts` |
 | The unset state of a `TextStyle` property is reachable (M21) | `tests/editor/typography-inspector.spec.ts` |
+| A style reference round-trips and its properties do not come back (M23) | `tests/render/style-stylesheet.test.ts` |
+| Per-property resolution, and merging only within one style (M23) | `src/model/styles.test.ts` |
+| Remove, unlink, document-wide deletion, and undo (M23) | `tests/model/style-selection.test.ts`, `tests/model/style-commands.test.ts` |
+| Format v5 definitions, references, and unresolved refs, both directions (M23) | `tests/persist/version5-styles.test.ts` |
+| Unlink does not move the glyphs; remove moves them back (M23) | `tests/editor/styles.spec.ts` |
 
 If the round-trip property fails, this design is wrong.
