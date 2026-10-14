@@ -43,6 +43,8 @@ import {
 import { prunedAssetTable } from './assets';
 import {
   applyDeleteStyle,
+  applyRemoveStyle,
+  applyUnlinkStyle,
   addStyle,
   renameStyle as renameStyleIn,
   replaceStyle,
@@ -115,6 +117,26 @@ export type Command =
   | { type: 'renameStyle'; id: string; name: string }
   /** Deletes a definition **and settles every reference to it** in the same command. */
   | { type: 'deleteStyle'; id: string; mode: StyleRemovalMode }
+  /**
+   * M23: **selection-level** unlink or remove, as one command with an explicit mode.
+   *
+   * Kept apart from `deleteStyle` because the reach differs: this touches only `ids`, while
+   * `deleteStyle` settles every reference in the document because it is removing the definition. A
+   * selection-level action that swept up every other user of the same style would change objects the
+   * user did not select.
+   *
+   *  - `unlink` writes the effective values down before dropping the reference, so the appearance
+   *    survives.
+   *  - `remove` drops the reference and keeps the object's own values, so what the style was
+   *    contributing falls back to the defaults.
+   */
+  | {
+      type: 'unlinkStyle';
+      ids: readonly string[];
+      category: StyleCategory;
+      styleId: string;
+      mode: StyleRemovalMode;
+    }
   /**
    * Points objects at a style, or clears the reference.
    *
@@ -516,6 +538,21 @@ export function apply(doc: Document, command: Command): Document {
 
     case 'renameStyle':
       return renameStyleIn(doc, command.id, command.name);
+
+case 'unlinkStyle': {
+      if (command.mode === 'remove') {
+        const { doc: removed, changed } = applyRemoveStyle(
+          doc,
+          command.ids,
+          command.category,
+          command.styleId,
+        );
+        // A shortcut pressed with nothing selected is inert, and `isNoop` turns that into "no
+        // history entry" rather than a dead undo step.
+        return changed === 0 ? doc : removed;
+      }
+      return applyUnlinkStyle(doc, command.ids, command.category, command.styleId);
+    }
 
     case 'deleteStyle':
       return applyDeleteStyle(doc, command.id, command.mode);
@@ -1044,6 +1081,8 @@ export function describeCommand(command: Command): string {
       return `Edit style ${command.style.name}`;
     case 'renameStyle':
       return 'Rename style';
+    case 'unlinkStyle':
+      return command.mode === 'remove' ? 'Remove style' : 'Unlink style';
     case 'deleteStyle':
       return command.mode === 'remove' ? 'Delete style' : 'Unlink style and delete';
     case 'applyStyle':

@@ -34,9 +34,11 @@ import { createId } from '../core/ids';
 import { CHAR_FLAGS, normalizeRichText } from './rich-text';
 import {
   documentReferences,
+  resolveStyle,
   effectiveCharFormat,
   effectiveParagraphProps,
   effectiveTextStyle,
+  type StyleCategory,
 } from './styles';
 import type { Command } from './commands';
 import type {
@@ -272,3 +274,175 @@ function subtreeReferencesStyle(node: Node, id: string, styles: readonly StyleDe
 
 /** Re-exported so `commands.ts` gets the one reducer it needs without reaching into `styles.ts`. */
 export { effectiveCharFormat as resolveCharacterStyle };
+/**
+ * M23: **selection-level** unlink. Distinct from `applyDeleteStyle`, which is document-wide.
+ *
+ * ## Why this is a separate function and not a `deleteStyle` with a scope
+ *
+ * Because the two have different reach and different blast radius, and conflating them is exactly
+ * the mistake the milestone warns about. `deleteStyle` settles **every** reference in the document
+ * because it removes the definition, and a dangling reference is the one outcome neither operation
+ * permits. Unlinking a style from the selection touches **only the selected objects**, and leaves the
+ * definition and every other user exactly as they were -- including other objects that reference the
+ * same style.
+ *
+ * "Only the selection" is the whole contract here. An unlink that swept up every user of a style
+ * would change objects the user did not select and never asked about, which is why the two are not
+ * one command with a flag.
+ */
+export function applyUnlinkStyle(
+  doc: Document,
+  ids: readonly string[],
+  category: StyleCategory,
+  styleId: string,
+): Document {
+  // Nothing to do unless the style exists and the category matches, so a shortcut aimed at a style
+  // that was deleted a moment ago is inert rather than an error.
+  if (resolveStyle(doc.styles, styleId, category) === undefined) return doc;
+  if (ids.length === 0) return doc;
+
+  return mapSelectedNodes(doc, ids, (node: Node) => {
+    if (node.type !== 'textFrame') return node;
+    const next = unlinkNode(node, doc.styles, styleId, category, 'unlink');
+    return next === node ? node : { ...next, text: normalizeRichText(next.text) };
+  });
+}
+
+/**
+ * Unlinks `styleId` from one frame's site for `category`, leaving every other reference alone.
+ *
+ * A frame that does not reference the style is returned by identity, so the renderer's
+ * reference-equality skip still fires for the untouched majority of a multi-selection.
+ */
+function unlinkNode(
+  node: TextFrameNode,
+  styles: readonly StyleDefinition[],
+  styleId: string,
+  category: StyleCategory,
+  mode: StyleRemovalMode,
+): TextFrameNode {
+  if (category === 'frame') {
+    if (node.styleId !== styleId) return node;
+    // `mode` is threaded rather than assumed. An earlier version hardcoded `unlink` here, which made
+    // the selection-level **Remove** action behave exactly like Unlink -- the one distinction this
+    // milestone exists to keep, failing in the direction that silently *preserves* formatting the
+    // user asked to lose.
+    return mode === 'unlink'
+      ? { ...node, style: effectiveTextStyle(node, styles), styleId: undefined }
+      : { ...node, styleId: undefined };
+  }
+
+  const blocks = node.text.blocks.map((block) => {
+    const nextBlock =
+      category === 'paragraph' && block.styleId === styleId
+        ? unlinkParagraph(block, styles, mode)
+        : block;
+    if (category !== 'character') return nextBlock;
+
+    const runs = nextBlock.runs.map((run) =>
+      run.styleId === styleId ? unlinkRun(run, styles, mode) : run,
+    );
+    return runs.some((run, index) => run !== nextBlock.runs[index])
+      ? { ...nextBlock, runs }
+      : nextBlock;
+  });
+
+  return blocks.some((block, index) => block !== node.text.blocks[index])
+    ? { ...node, text: { blocks } }
+    : node;
+}
+
+/**
+ * M23: **selection-level** remove -- the same semantics as `applyStyle` with a null id, named for the
+ * place the UI reaches it from.
+ *
+ * Kept as a function rather than only as the null form of `applyStyle` because the confirmation
+ * dialog has to be able to ask "how many of the selection actually reference this style?" before the
+ * user commits to the destructive reading, and that question needs one place to be asked.
+ *
+ * Returns how many objects it actually changed, so the caller can tell the user what happened rather
+ * than guessing -- a shortcut pressed with nothing selected should say so, not claim success.
+ */
+export function applyRemoveStyle(
+  doc: Document,
+  ids: readonly string[],
+  category: StyleCategory,
+  styleId: string,
+): { doc: Document; changed: number } {
+  if (resolveStyle(doc.styles, styleId, category) === undefined) return { doc, changed: 0 };
+  if (ids.length === 0) return { doc, changed: 0 };
+
+  let changed = 0;
+  const next = mapSelectedNodes(doc, ids, (node: Node) => {
+    if (node.type !== 'textFrame') return node;
+    const updated = unlinkNode(node, doc.styles, styleId, category, 'remove');
+    if (updated === node) return node;
+    changed += 1;
+    return { ...updated, text: normalizeRichText(updated.text) };
+  });
+
+  return { doc: changed === 0 ? doc : next, changed };
+}
+
+/**
+ * How many of `ids` reference `styleId` at the given site.
+ *
+ * For the confirmation dialog, which must be able to say "this affects 3 of your 5 selected objects"
+ * rather than implying the whole selection is involved. Counting *references* rather than objects,
+ * because a frame whose three paragraphs all reference the style is one object and three references,
+ * and the user is choosing per object.
+ */
+export function countStyleUsers(
+  doc: Document,
+  ids: readonly string[],
+  styleId: string,
+): number {
+  return documentReferences(doc).filter(
+    (reference) => reference.styleId === styleId && ids.includes(reference.nodeId),
+  ).length;
+}
+/**
+ * Applies `visit` to the selected nodes, descending into groups.
+ *
+ * Written here rather than imported because `commands.ts`' `mapNodesById` is deliberately not
+ * exported -- it is an implementation detail of that switch statement, and a second copy of it
+ * drifting from the first would be a class of bug this file has no reason to take on. A style action
+ * that silently skipped a styled object *inside a group* would be exactly that.
+ *
+ * Nodes are returned by identity when `visit` returns them unchanged, so an untouched page or group
+ * costs nothing and the renderer's reference-equality skip still fires.
+ */
+function mapSelectedNodes(
+  doc: Document,
+  ids: readonly string[],
+  visit: (node: Node) => Node,
+): Document {
+  const wanted = new Set(ids);
+
+  const walk = (nodes: readonly Node[]): Node[] => {
+    let changed = false;
+    const next = nodes.map((node) => {
+      if (node.type === 'group') {
+        const children = walk(node.children);
+        if (children.every((child, index) => child === node.children[index])) return node;
+        changed = true;
+        return { ...node, children };
+      }
+      if (!wanted.has(node.id)) return node;
+      const updated = visit(node);
+      if (updated !== node) changed = true;
+      return updated;
+    });
+    return changed ? next : (nodes as Node[]);
+  };
+
+  let anyPage = false;
+  const pages = doc.pages.map((page) => {
+    const objects = walk(page.objects);
+    if (objects.every((node, index) => node === page.objects[index])) return page;
+    anyPage = true;
+    return { ...page, objects };
+  });
+
+  return anyPage ? { ...doc, pages } : doc;
+}
