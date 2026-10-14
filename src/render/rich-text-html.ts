@@ -38,7 +38,7 @@ import type {
   StyleDefinition,
 } from '../model/types';
 import { styleParagraphProps } from '../model/styles';
-import { STYLE_REF_ATTRIBUTE, styleExists } from './style-sheet';
+import { STYLE_REF_ATTRIBUTE } from './style-sheet';
 import {
   hasFormat,
   normalizeRichText,
@@ -167,15 +167,23 @@ export function richTextToHtml(
     setStyle(paragraph, 'margin-block-start', optionalLength(metrics?.marginBefore));
     setStyle(paragraph, 'margin-block-end', optionalLength(metrics?.marginAfter));
 
-    // The reference itself. Written only when it resolves to a paragraph style, so a dangling or
-    // wrong-category `styleId` leaves nothing in the DOM to mislead a reader of the markup -- and
-    // leaves the walker nothing to mistake for an authored value.
-    if (styleExists(styles, block.styleId, 'paragraph')) {
-      paragraph.setAttribute(STYLE_REF_ATTRIBUTE, block.styleId ?? '');
+    // The reference itself, written whenever the model carries one -- **including** when it does
+    // not resolve.
+    //
+    // An earlier version wrote the attribute only for a resolvable id, on the reasoning that a
+    // dangling one had nothing to contribute. That quietly dropped it from the DOM: the walker read
+    // nothing, and the next save wrote a document that had lost the reference. The model kept it and
+    // the file did not, which is silent corruption, and M23 explicitly forbids it.
+    //
+    // An unresolvable id has no rule and so no effect here, which is the correct reading. It just
+    // must not evaporate -- the reference has to survive the round trip so that a build which *does*
+    // know the style can still resolve it.
+    if (block.styleId !== undefined) {
+      paragraph.setAttribute(STYLE_REF_ATTRIBUTE, block.styleId);
     }
 
     for (const r of block.runs) {
-      paragraph.append(runToNode(r, styles));
+      paragraph.append(runToNode(r));
     }
     fragment.append(paragraph);
   }
@@ -196,7 +204,7 @@ function optionalLength(value: number | undefined): string {
 }
 
 /** One run: its text node, wrapped once per set flag, in canonical order. */
-function runToNode(r: InlineRun, styles: readonly StyleDefinition[]): Node {
+function runToNode(r: InlineRun): Node {
   // A literal `\n`, not `<br>`: `white-space: pre-wrap` renders it. See the header.
   const text = document.createTextNode(r.text);
 
@@ -204,11 +212,12 @@ function runToNode(r: InlineRun, styles: readonly StyleDefinition[]): Node {
   // properties live in the stylesheet. Deliberately not `<b>`/`<i>` wrappers: those are how the
   // walker recognises a *direct* flag, so a style's flags written as wrappers would be read back as
   // direct overrides on the next edit and detach the run from its style permanently.
-  const styled = styleExists(styles, r.styleId, 'character');
+  // Written whenever the model carries a reference, resolvable or not -- for the same
+  // reason as the paragraph case: dropping an unresolvable one loses it from the saved document.
   let node: Node = text;
-  if (styled) {
+  if (r.styleId !== undefined) {
     const span = document.createElement('span');
-    span.setAttribute(STYLE_REF_ATTRIBUTE, r.styleId ?? '');
+    span.setAttribute(STYLE_REF_ATTRIBUTE, r.styleId);
     span.append(node);
     node = span;
   }
