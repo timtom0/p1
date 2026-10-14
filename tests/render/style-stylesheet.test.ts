@@ -178,7 +178,7 @@ describe('the generated stylesheet', () => {
     // one `{` survives, and the only declaration in the rule is ours.
     const outsideStrings = css.replace(/"(?:[^"\\]|\\.)*"/g, '""');
     expect((outsideStrings.match(/\{/g) ?? []).length, 'the id escaped its string and became a rule').toBe(1);
-    expect(css.startsWith('[data-style-id="a\\"]'), 'the id was not escaped').toBe(true);
+    expect(css.startsWith('.p1-text-content [data-style-id="a\\"]'), 'the id was not escaped').toBe(true);
     // The opening brace is found from the *end*: the id itself contains one, inside the quoted
     // string, and taking the first would slice the declaration out of the middle of the selector.
     const body = css.slice(css.lastIndexOf('{') + 1, css.lastIndexOf('}'));
@@ -187,5 +187,26 @@ describe('the generated stylesheet', () => {
 
   it('is empty for a document with no styles', () => {
     expect(styleSheetCss([])).toBe('');
+  });
+
+  it('out-specifies the renderer base rule, which is what makes a margin render at all', () => {
+    // The defect this pins, found in a browser and not in any unit test.
+    //
+    // `.p1-text-content p { margin: 0 }` is specificity (0,1,1). A bare `[data-style-id]` selector
+    // is (0,1,0) and loses, so every logical margin a paragraph style supplied computed to zero --
+    // silently, and while the same rule's `text-align` and `direction` *did* apply. It surfaced as
+    // "unlink moved the text", which is the one thing unlink must never do.
+    //
+    // Asserted here as a shape rather than as a cascade: the stylesheet module has no access to the
+    // chrome stylesheet, so what it can promise is that its selectors are qualified. The browser
+    // suite is where the two actually meet.
+    const css = styleSheetCss([PARAGRAPH]);
+    expect(css.startsWith('.p1-text-content [data-style-id=')).toBe(true);
+    // Every rule, not just the first: a stylesheet where one category qualified and another did not
+    // would reintroduce the same bug for frame styles.
+    for (const style of [CHARACTER, PARAGRAPH, { ...PARAGRAPH, kind: 'frame', frame: {} } as const]) {
+      const rule = styleSheetCss([style as never]);
+      if (rule !== '') expect(rule.startsWith('.p1-text-content [data-style-id=')).toBe(true);
+    }
   });
 });

@@ -89,7 +89,17 @@ export function styleSheetCss(styles: readonly StyleDefinition[]): string {
   const rules: string[] = [];
 
   for (const style of styles) {
-    const selector = `[${STYLE_REF_ATTRIBUTE}="${escapeSelectorValue(style.id)}"]`;
+    // Qualified by `.p1-text-content`, and the qualification is load-bearing rather than tidy.
+    //
+    // The renderer's own base rule is `.p1-text-content p { margin: 0 }`, which is specificity
+    // (0,1,1). A bare attribute selector is (0,1,0) and loses. So a paragraph style's
+    // `marginStart` and `marginEnd` computed to zero, silently, while its alignment and direction
+    // applied -- which is the worst possible shape of bug, because half the style demonstrably
+    // worked. It surfaced as "unlink moved the text", which is supposed to be impossible.
+    //
+    // Qualifying makes the rule (0,2,1) and says what it already was true of: these declarations
+    // apply to document text content and to nothing else.
+    const selector = `.p1-text-content [${STYLE_REF_ATTRIBUTE}="${escapeSelectorValue(style.id)}"]`;
 
     if (style.kind === 'character') {
       const declarations = characterDeclarations(style.character);
