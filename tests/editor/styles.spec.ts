@@ -325,6 +325,49 @@ test.describe('deleting a definition', () => {
     expect(await dialog.locator('[data-style-cancel]').isVisible()).toBe(true);
   });
 
+  test('focuses the plain confirmation, so Enter cannot fall into a branch by reflex', async ({ page }) => {
+    await page.locator('[data-style-delete]').click();
+    const dialog = page.locator('[data-style-dialog="deletion"]');
+    await dialog.waitFor({ state: 'visible' });
+    // `remove` is the choice that discards formatting. A dialog that focused it would make the
+    // fastest possible path through this dialog the destructive one, which is exactly backwards:
+    // the *slow* path should be the destructive one.
+    expect(
+      await page.evaluate(() => document.activeElement?.getAttribute('data-style-choice')),
+      'the destructive choice took focus',
+    ).toBeNull();
+    expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-style-confirm'))).toBe(
+      true,
+    );
+  });
+
+  test('applying a style from the picker takes the id, and clearing it removes only the reference', async ({
+    page,
+  }) => {
+    // Pick the frame with nothing on it, so applying is observable rather than a no-op on a style
+    // it already has.
+    await clickAt(page, A + 150, 270);
+    await pickCategory(page, 'paragraph');
+    expect(await selectedName(page)).toBe('');
+
+    await page.locator('[data-style-select]').selectOption('sty_quote');
+    await settle(page);
+    const doc = await saved(page);
+    const blocks = (frameNamed(doc, 'plain')['text'] as { blocks: Array<Record<string, unknown>> }).blocks;
+    expect(blocks[0]?.['styleId']).toBe('sty_quote');
+
+    // And clearing the picker is *remove*: the reference goes and nothing is written down.
+    const before = await firstLineBox(page, 'plain');
+    await page.locator('[data-style-select]').selectOption('');
+    await settle(page);
+    expect((await firstLineBox(page, 'plain')).x).toBeLessThan(before.x);
+    const after = await saved(page);
+    const cleared = (frameNamed(after, 'plain')['text'] as { blocks: Array<Record<string, unknown>> })
+      .blocks;
+    expect(cleared[0]?.['styleId']).toBeUndefined();
+    expect(cleared[0]?.['align'], 'clearing the picker materialised the inherited alignment').toBeUndefined();
+  });
+
   test('cancel changes nothing', async ({ page }) => {
     await page.locator('[data-style-delete]').click();
     const dialog = page.locator('[data-style-dialog="deletion"]');

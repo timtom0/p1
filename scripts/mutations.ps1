@@ -921,12 +921,12 @@ Add-Mutation 'every page selects the first page named sheet, so a mixed-size doc
 
 Add-Mutation 'adjacent runs with equal formatting are never merged, so the same text has many spellings' `
   'src\model\rich-text.ts' `
-  { param($t) $t.Replace('if (previous !== undefined && formatsEqual(previous.format, run.format)) {', 'if (false) {') } `
+  { param($t) $t.Replace('if (previous !== undefined && runsCompatible(previous, run)) {', 'if (false) {') } `
   'src/model/rich-text.test.ts'
 
 Add-Mutation 'runs with *different* formatting are merged, so formatting is lost at every boundary' `
   'src\model\rich-text.ts' `
-  { param($t) $t.Replace('formatsEqual(previous.format, run.format)', 'true') } `
+  { param($t) $t.Replace('runsCompatible(previous, run)', 'true') } `
   'src/model/rich-text.test.ts'
 
 Add-Mutation 'empty runs are kept, so a browser-emitted empty run defeats merging' `
@@ -1097,7 +1097,7 @@ Add-Mutation 'the signed/unsigned split between textIndent and the margins is in
 
 Add-Mutation 'a version-3 paragraph carrying `dir` is accepted, so a v3 build would re-save without it' `
   'src\persist\format.ts' `
-  { param($t) $t.Replace('return version >= 4 ? PARAGRAPH_KEYS : LEGACY_PARAGRAPH_KEYS;', 'return PARAGRAPH_KEYS;') } `
+  { param($t) $t.Replace('if (version < 4) return LEGACY_PARAGRAPH_KEYS;', 'if (version < 3) return LEGACY_PARAGRAPH_KEYS;') } `
   'tests/persist/version4-migration.test.ts'
 
 Add-Mutation 'the inspector reports a mixed indent as "no first-line indent"' `
@@ -1119,3 +1119,188 @@ Add-Mutation 'a paragraph property change is routed through the model even insid
   'src\ui\chrome\editing-shortcuts.ts' `
   { param($t) $t.Replace('if ((event.ctrlKey || event.metaKey) && inside !== null && !BROWSER_OWNS[inside]) {', 'if (false) {') } `
   'tests/editor/typography-paragraph.spec.ts'
+
+# ---------------------------------------------------------------------------
+# --- M23: reusable document-local styles ----------------------------------
+#
+# The rule this block exists to enforce: **a resolved value must never be written down**. The only
+# two operations that DO materialize are `unlinkStyle` and deletion-with-unlink, and a mutant that
+# turns either into "write the resolved value anyway" is the one defect this milestone exists to
+# make impossible.
+#
+# The shape of the block follows the layering the milestone actually has:
+#
+#  * the resolution rule, per property, in `model/styles.ts` -- direct wins, then the style, then the
+#    default. Removing any term of it is a mutant, and each is killed by a different half of the
+#    same assertion.
+#  * the two materialization commands, aimed at the selection suite rather than the resolution suite,
+#    because the difference between them is *which values appear on the object*, not what any
+#    resolver returns.
+#  * the stylesheet, aimed at the **browser** suite. Every mutant in that group renders correctly
+#    under happy-dom and wrong on screen, which is the whole reason the M23 browser suite exists.
+#
+# The qualification mutant is the one this milestone actually shipped broken: the generated rule lost
+# to `.p1-text-content p { margin: 0 }` on specificity, so every logical margin a style supplied
+# computed to zero while its `text-align` and `direction` applied perfectly. Nothing short of a glyph
+# measurement could see it, and it presented as "unlink moved the text" -- which is the one thing
+# unlink must never do.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'the generated rule loses its qualification and is out-specified by the renderer base rule' `
+  'src\render\style-sheet.ts' `
+  { param($t) $t.Replace('const selector = `.p1-text-content [${STYLE_REF_ATTRIBUTE}="${escapeSelectorValue(style.id)}"]`;', 'const selector = `[${STYLE_REF_ATTRIBUTE}="${escapeSelectorValue(style.id)}"]`;') } `
+  'tests/editor/styles.spec.ts'
+
+Add-Mutation 'the style id is not escaped, so a hand-edited document can inject a rule' `
+  'src\render\style-sheet.ts' `
+  { param($t) $t.Replace('escapeSelectorValue(style.id)', 'style.id') } `
+  'tests/render/style-stylesheet.test.ts'
+
+# Two substitutions from this block were removed after measurement, and both are *equivalent
+# mutants* rather than coverage gaps -- the changed code cannot be distinguished from the original by
+# any behaviour, so no test could ever kill them:
+#
+#  * `unlinkParagraph` rebuilt from `{ kind, runs }` instead of `{ ...block }`. The three assignments
+#    immediately after it re-derive `align`, `dir` and `metrics` from `effectiveParagraphProps`, which
+#    reads the block -- so the rebuild produces the same object and the spread is redundant, not
+#    load-bearing. The mutant was retargeted at the resolution instead, where the defect is real.
+#
+#  * the paragraph always getting a `dir` attribute, even when the direction is inherited. HTML treats
+#    `dir` as a *presentational hint*, which loses to any author declaration, so the stylesheet's
+#    `direction: rtl` still wins and the rendering is identical. Omitting the attribute is therefore
+#    a clarity change, not a correctness one -- and the browser suite confirmed the browser does not
+#    distinguish them, which is the point.
+#
+# A third, "the keyboard path claims the keystroke even when it does nothing", was also removed: the
+# only observable difference is whether the default action is suppressed for a chord no browser binds,
+# which is not state a test can read.
+
+Add-Mutation 'the walker stops reading the style reference, so the first save detaches the paragraph from its style' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace('paragraphStyleId = readStyleRef(element) ?? paragraphStyleId;', 'paragraphStyleId = paragraphStyleId;') } `
+  'tests/render/style-stylesheet.test.ts'
+
+Add-Mutation 'a run''s style reference is never read back, so a character style detaches on the first keystroke' `
+  'src\render\rich-text-html.ts' `
+  { param($t) $t.Replace('(tag === ''SPAN'' ? readStyleRef(element) : undefined) ?? styleId;', 'styleId;') } `
+  'tests/render/style-stylesheet.test.ts'
+
+Add-Mutation 'runs merge across a style boundary, so unlinking one run silently inherits the other''s formatting' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('return left.styleId === right.styleId && formatsEqual(left.format, right.format);', 'return formatsEqual(left.format, right.format);') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'equal-format runs are never merged, so the same text has many spellings' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (previous !== undefined && runsCompatible(previous, run)) {', 'if (false) {') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'runs with different formats are merged, so formatting is lost at every boundary' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('if (previous !== undefined && runsCompatible(previous, run)) {', 'if (previous !== undefined) {') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'normalisation drops the run''s style reference, so saving detaches it from its style' `
+  'src\model\rich-text.ts' `
+  { param($t) $t.Replace('...(run.styleId === undefined ? {} : { styleId: run.styleId }),', '') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'the style beats direct formatting, so an override is unreachable' `
+  'src\model\styles.ts' `
+  { param($t) $t.Replace('const align = block.align ?? inherited.align;', 'const align = inherited.align ?? block.align;') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'a paragraph resolves its style across categories, so a character style can be applied to a paragraph' `
+  'src\model\styles.ts' `
+  { param($t) $t.Replace('if (found === undefined || found.kind !== kind) return undefined;', 'if (found === undefined) return undefined;') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'an unresolved reference resolves to nothing rather than to the first style in the table' `
+  'src\model\styles.ts' `
+  { param($t) $t.Replace('const found = styles.find((style) => style.id === id);', 'const found = styles.find((style) => style.id === id) ?? styles[0];') } `
+  'src/model/styles.test.ts'
+
+Add-Mutation 'unlink freezes the style''s value over one the object had already overridden' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace('if (resolved.align !== undefined) next.align = resolved.align;', 'if (resolved.align !== undefined) next.align = resolved.align; delete next.align; next.align = block.align;') } `
+  'tests/model/style-selection.test.ts'
+
+Add-Mutation 'selection-level remove materialises the resolved values, making it identical to unlink' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace('? unlinkParagraph(block, styles, mode)', "? unlinkParagraph(block, styles, 'unlink')") } `
+  'tests/model/style-selection.test.ts'
+
+Add-Mutation 'unlink resolves the style''s values over the ones the object had already overridden' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace('const resolved = effectiveParagraphProps(styles, block);', 'const resolved = effectiveParagraphProps(styles, { ...block, align: undefined, dir: undefined, metrics: undefined });') } `
+  'tests/model/style-selection.test.ts'
+
+Add-Mutation 'a selection-level style action reaches every user of the style, not only the selection' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace('const wanted = new Set(ids);', 'const wanted = new Set(allNodeIds(doc));') } `
+  'tests/model/style-selection.test.ts'
+
+Add-Mutation 'deleting a style with remove leaves every reference dangling' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace("if (mode === 'remove') return dropStyleId(block);", 'if (mode === ''remove'') return block;') } `
+  'tests/model/style-commands.test.ts'
+
+Add-Mutation 'deleting a style settles references by style name rather than by id, so a rename strands them' `
+  'src\model\style-commands.ts' `
+  { param($t) $t.Replace('block.styleId === id', 'doc.styles.find((s) => s.name === id)?.id === block.styleId') } `
+  'tests/model/style-commands.test.ts'
+
+Add-Mutation 'the deserialiser never reads a run''s style reference, so a character style is lost the moment the file is re-opened' `
+  'src\persist\deserialize.ts' `
+  { param($t) [regex]::Replace($t, '(?m)^ {4}run\.styleId = expectId\([^)]*\);\r?\n', '') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'a frame''s style reference is never written, so a frame style survives only until the first save' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace('if (node.styleId !== undefined) out.styleId = node.styleId;', '') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'a paragraph''s style reference is never written, so the style is lost on the first save' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace('if (block.styleId !== undefined) out.styleId = block.styleId;', '') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'a run''s style reference is never written, so the character style is lost on the first save' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace('if (run.styleId !== undefined) copy.styleId = run.styleId;', '') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'a document is written without its style table, so every style is lost on save' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace('styles: doc.styles.map(canonicalStyle)', 'styles: []') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'duplicate style ids are accepted, so the second silently shadows the first' `
+  'src\persist\deserialize.ts' `
+  { param($t) $t.Replace('    if (seen.has(id)) {', '    if (false) {') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'a document is refused for carrying `styles`, because the key was never added to the accepted list' `
+  'src\persist\format.ts' `
+  { param($t) [regex]::Replace($t, '(?m)^  .styles.,\r?\n', '') } `
+  'tests/persist/version5-styles.test.ts'
+
+Add-Mutation 'the panel applies the style the picker names by matching its name rather than its id' `
+  'src\ui\styles-panel.ts' `
+  { param($t) $t.Replace("styleId: picker.value === '' ? null : picker.value,", "styleId: picker.value === '' ? null : editor.doc.styles.find((s) => s.name === picker.value)?.id ?? null,") } `
+  'tests/editor/styles.spec.ts'
+
+Add-Mutation 'the deletion dialog focuses the discards-formatting button, so Enter takes the destructive branch by reflex' `
+  'src\ui\style-dialog.ts' `
+  { param($t) $t.Replace('parts.confirm.focus();', 'parts.removeButton.focus();') } `
+  'tests/editor/styles.spec.ts'
+
+Add-Mutation 'the two style chords are swapped, so unlink discards formatting' `
+  'src\ui\chrome\editing-shortcuts.ts' `
+  { param($t) $t.Replace("  u: 'unlink',`n  r: 'remove',", "  u: 'remove',`n  r: 'unlink',") } `
+  'tests/editor/styles.spec.ts'
+
+Add-Mutation "the toast's undo re-runs the action instead of undoing it" `
+  'src\ui\toast.ts' `
+  { param($t) $t.Replace('options.action?.run();', 'dismiss();') } `
+  'tests/editor/styles.spec.ts'
