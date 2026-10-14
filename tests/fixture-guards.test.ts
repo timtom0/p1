@@ -154,12 +154,23 @@ function findUnsizedPages(file: string): string[] {
  * Two fields need that window now, and two copies of it would drift.
  */
 function fieldsMissingFrom(literals: readonly DocumentLiteral[], field: string): string[] {
+  // Matched as a **key at the start of a line**, not as a substring, and that is not fussiness.
+  // A plain `includes('styles')` is satisfied by the word "stylesheet" in a doc comment -- which is
+  // exactly what happened: `measure-fixtures.ts` documents one fixture as existing "so the
+  // measurement does not depend on a stylesheet the document does not own", and that sentence was
+  // accepted as the *next* literal's `styles` field. Eleven browser tests failed to boot on a
+  // fixture the guard had certified.
+  //
+  // A comment must never be able to satisfy a guard about code, and the only reliable way to say
+  // that is to require the shape a key has.
+  const key = new RegExp(`^[ \\t]*${field}[ \\t]*:`, 'm');
+
   const missing: string[] = [];
   for (const literal of literals) {
     const source = readFileSync(literal.file, 'utf8');
     const next = source.indexOf('pageSetup:', literal.after);
     const end = next === -1 ? source.length : next;
-    if (!source.slice(literal.after, end).includes(field)) {
+    if (!key.test(source.slice(literal.after, end))) {
       missing.push(`${testRelativePath(literal.file)}:${literal.line}`);
     }
   }

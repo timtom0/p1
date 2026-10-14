@@ -286,10 +286,12 @@ test.describe('the sheet is the document page', () => {
       buffer: Buffer.from(
         JSON.stringify({
           format: 'p1doc',
-          formatVersion: 3,
+          formatVersion: 5,
           id: 'other',
           name: 'Other',
           pageSetup: { fixedSize: true, defaultSize: { width: 5, height: 7, unit: 'in', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          // Format 5: this document is *loaded* through the file input, so it is parsed, and a
+          // v3 reader would refuse styles as a field it does not know.
           styles: [],
           assets: {},
           pages: [

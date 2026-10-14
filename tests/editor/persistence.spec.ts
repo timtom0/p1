@@ -491,10 +491,12 @@ test.describe('assets', () => {
 
     const external = JSON.stringify({
       format: 'p1doc',
-      formatVersion: 3,
+      formatVersion: 5,
       id: 'doc_ext',
       name: 'External',
       pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      // Format 5, like every other loaded document here: this one is parsed, not injected, so its
+      // version is load-bearing and styles is a field it must declare.
       styles: [],
       assets: {
         asset_x: {
@@ -568,7 +570,11 @@ test.describe('refused documents', () => {
   function base(): Record<string, unknown> {
     return {
       format: 'p1doc',
-      formatVersion: 3,
+      // Format 5, because this document carries `styles` and is opened through the *loader* rather
+      // than injected. An injected fixture is handed to the store verbatim and its version number
+      // is decorative; a loaded one is parsed, and a v3 reader rejects `styles` as an unknown field
+      // -- which is a correct answer, and not the one these tests are about.
+      formatVersion: 5,
       id: 'doc_1',
       name: 'Base',
       pageSetup: {
