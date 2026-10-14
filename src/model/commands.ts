@@ -145,7 +145,7 @@ export type Command =
       ids: readonly string[];
       category: StyleCategory;
       key: string;
-      value: string | number | null;
+      value: string | number | boolean | null;
     }
   | { type: 'setPageProps'; pageId: string; props: PagePropsPatch }
   // --- page management (M20) -------------------------------------------------------------------------------------
@@ -526,7 +526,10 @@ export function apply(doc: Document, command: Command): Document {
         // Each category writes only the site it owns, so a character style applied to a frame is a
         // no-op on it rather than a reference that resolves to nothing.
         const next = applyStyleToFrame(node, doc.styles, command.category, command.styleId);
-        return next === node ? node : { ...node, text: normalizeRichText(next.text) };
+        // Spreads **`next`**, not `node`. Rebuilding from `node` was wrong and silently so: for a
+        // frame style `applyStyleToFrame` sets `styleId`, which the rebuild then threw away, so
+        // applying a frame style to anything did nothing at all -- no error, no history, no change.
+        return next === node ? node : { ...next, text: normalizeRichText(next.text) };
       });
 
     case 'setStyleOverride':
@@ -1396,7 +1399,7 @@ function setOverrideOnFrame(
   _styles: readonly StyleDefinition[],
   category: StyleCategory,
   key: string,
-  value: string | number | null,
+  value: string | number | boolean | null,
 ): TextFrameNode {
   if (category === 'frame') {
     const style: Record<string, unknown> = { ...(node.style ?? {}) };
@@ -1430,7 +1433,7 @@ function setOverrideOnFrame(
 function setParagraphOverride(
   block: ParagraphBlock,
   key: string,
-  value: string | number | null,
+  value: string | number | boolean | null,
 ): ParagraphBlock {
   if (key === 'align') {
     const next = value === null ? undefined : (value as ParagraphAlign);
@@ -1457,7 +1460,7 @@ function setParagraphOverride(
 function setRunOverride(
   run: InlineRun,
   key: string,
-  value: string | number | null,
+  value: string | number | boolean | null,
 ): InlineRun {
   if (!(CHAR_FLAGS as readonly string[]).includes(key)) return run;
   const flag = key as keyof CharFormat;
