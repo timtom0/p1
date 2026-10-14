@@ -245,7 +245,7 @@ export class DocumentView {
       // accident to rely on quietly: a group has no visual form of its own, so a registry entry
       // would have to render an empty box and silently occupy a paint slot. The filter is
       // explicit below for the same reason the comment is.
-      const projected = placementsOnPage(page).map(projectPlacement);
+      const projected = page.objects.filter((node) => node.type !== 'group') as Node[];
       if (projected.some((node) => node.type === 'group')) {
         throw new Error('a group reached the renderer: placements must be leaves');
       }

@@ -19,8 +19,10 @@ playwright-report/
 # Narrowed-replay cache: a machine-generated map from mutation label to the test that catches it.
 # Disposable by design — deleting it costs one slow run and nothing else, which is exactly why it is
 # not committed. `scripts/mutations.ps1` stays hand-curated; this is not.
-scripts/mutation-claims.json  # The mutation runner's crash-recovery scratch copies of the files it is mid-way through editing.
-  # Same reasoning as `mutation-claims.json` above: a machine-generated snapshot of a tree that is
-  # deliberately broken right now is not source, and committing it captures mutants as if they were
-  # the real thing.
-  scripts/.mutation-backup
+scripts/mutation-claims.json
+
+# The mutation runner's crash-recovery copies of the files it is mid-way through editing. Same
+# reasoning as the cache above: a snapshot of a tree that is deliberately broken right now is not
+# source, and committing it captures mutants as if they were the real thing. Its own line, and its
+# own paragraph, because a rule appended to the end of a comment is a rule that does not exist.
+scripts/.mutation-backup/

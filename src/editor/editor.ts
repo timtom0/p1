@@ -902,7 +902,7 @@ export class Editor {
     // now because of the missing aggregate frame, which is a decision, rather than because of a
     // geometry bug.
     let rotationHandle: { pageId: string; point: Vec2 } | null = null;
-    const outline = outlines.length > 0 ? outlines[0] : undefined;
+    const outline = outlines.length === 1 ? outlines[0] : undefined;
     if (outline !== undefined) {
       rotationHandle = {
         pageId: outline.pageId,
@@ -1538,7 +1538,7 @@ export class Editor {
   private rotationHandleAt(client: Vec2): { centre: Vec2 } | null {
     const input = this.overlayInput();
     const handle = input.rotationHandle;
-    const outline = input.outlines.length > 0 ? input.outlines[0] : undefined;
+    const outline = input.outlines.length === 1 ? input.outlines[0] : undefined;
     if (handle === null || outline === undefined) return null;
 
     const pageIndex = this.doc.pages.findIndex((page) => page.id === handle.pageId);
