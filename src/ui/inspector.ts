@@ -38,7 +38,7 @@ import type { PropertySpec } from '../model/shapes';
 import { defaultStroke } from '../model/creation';
 import { findNode } from '../editor/selection';
 import type { CharFlag } from '../model/rich-text';
-import { formatLength, parseLength as parseLengthPx } from '../core/units/units';
+import { formatLength, parseLength } from '../core/units/units';
 import type { PhysicalUnit } from '../core/units/units';
 import { createStylesPanel } from './styles-panel';
 import { registerStyleActions, styleUi } from './style-ui';
@@ -1762,19 +1762,6 @@ function parseDegrees(raw: string): number | null {
   return Number.isFinite(value) ? (value * Math.PI) / 180 : null;
 }
 
-/**
- * Parses a length into **document px**, defaulting a bare number to `defaultUnit`.
- *
- * The default matters more than it looks. The field *displays* the page's authored
- * unit, so a user who selects "30pt" and types "75" means 75pt. Letting `parseLength`
- * fall back to px would set 75px instead — a silent 25% error on a value the user can
- * see they typed correctly. The field has to read in the unit it writes in.
- */
-function parseLength(raw: string, defaultUnit: PhysicalUnit): number | null {
-  const hasUnit = /[a-z]+\s*$/i.test(raw.trim());
-  const withDefault = hasUnit ? raw : `${raw}${defaultUnit}`;
-  return parseLengthPx(withDefault);
-}
 
 function formatDegrees(radians: number): string {
   const degrees = (radians * 180) / Math.PI;

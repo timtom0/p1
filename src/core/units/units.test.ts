@@ -6,6 +6,7 @@ import {
   isPhysicalUnit,
   isUnit,
   parseLength,
+  readLength,
   toPx,
   PX_PER_INCH,
 } from './units';
@@ -42,19 +43,44 @@ describe('units', () => {
     expect(toPx(297, 'mm')).toBeCloseTo(1122.5196850, 6);
   });
 
+  it('reads a bare number in its own field unit, which is the M24 contract', () => {
+    // The regression this milestone exists to prevent. The old signature defaulted a bare number to
+    // `px`, so a field displaying `mm` that received "75" stored 75 *pixels* -- off by a factor of
+    // 3.4, with nothing on screen to suggest it.
+    expect(parseLength('75', 'mm')).toBeCloseTo(toPx(75, 'mm'), 9);
+    expect(parseLength('75', 'pt')).toBeCloseTo(toPx(75, 'pt'), 9);
+    expect(parseLength('75', 'in')).toBeCloseTo(75 * 96, 9);
+    // ...and a suffix still wins over the field's unit, so `12mm` in a points field is 12mm.
+    expect(parseLength('12mm', 'pt')).toBeCloseTo(toPx(12, 'mm'), 9);
+    expect(parseLength('12', 'pt')).not.toBeCloseTo(parseLength('12mm', 'pt') as number, 3);
+  });
+
   it('parses lengths with and without units', () => {
-    expect(parseLength('12')).toBeCloseTo(12, 9);
-    expect(parseLength('12px')).toBeCloseTo(12, 9);
-    expect(parseLength('25.4mm')).toBeCloseTo(96, 9);
-    expect(parseLength(' 1 in ')).toBeCloseTo(96, 9);
-    expect(parseLength('-3pt')).toBeCloseTo(-4, 9);
+    expect(parseLength('12', 'px')).toBeCloseTo(12, 9);
+    expect(parseLength('12px', 'mm')).toBeCloseTo(12, 9);
+    expect(parseLength('25.4mm', 'px')).toBeCloseTo(96, 9);
+    expect(parseLength(' 1 in ', 'px')).toBeCloseTo(96, 9);
+    expect(parseLength('-3pt', 'px')).toBeCloseTo(-4, 9);
   });
 
   it('rejects unparseable input instead of guessing', () => {
-    expect(parseLength('')).toBeNull();
-    expect(parseLength('abc')).toBeNull();
-    expect(parseLength('12em')).toBeNull();
-    expect(parseLength('1,5mm')).toBeNull();
+    expect(parseLength('', 'mm')).toBeNull();
+    expect(parseLength('abc', 'mm')).toBeNull();
+    expect(parseLength('12em', 'mm')).toBeNull();
+    expect(parseLength('1,5mm', 'mm')).toBeNull();
+    // Scribus returns 0 for all four of these (`unitValueFromString`). Returning `null` is the
+    // deliberate deviation: zero is a *value*, and a field that cannot tell "refused" from "zero"
+    // writes a number the user did not type.
+  });
+
+  it('names why a value was refused, so a field can say so', () => {
+    expect(readLength('', 'mm').problem).toBe('empty');
+    expect(readLength('abc', 'mm').problem).toBe('not-a-number');
+    // The distinction that matters: `12em` is not a number *we accept*, and telling a user "not a
+    // number" about a string that plainly is one is worse than saying nothing.
+    expect(readLength('12em', 'mm').problem).toBe('unknown-unit');
+    expect(readLength('12mm', 'pt')).toEqual({ px: toPx(12, 'mm'), unit: 'mm' });
+    expect(readLength('12', 'pt')).toEqual({ px: toPx(12, 'pt'), unit: 'pt' });
   });
 
   it('formats without trailing zeros', () => {
