@@ -101,6 +101,7 @@ function documentWith(objects: unknown[], assets: Record<string, unknown> = {}):
       fixedSize: true,
       defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
       resizeBehaviour: 'crop',
+      unit: 'mm',
     },
     // M23: every document carries a style table, possibly empty.
     styles: [],

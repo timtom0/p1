@@ -75,13 +75,13 @@ import {
   MINIMUM_FORMAT_VERSION,
   nodeKeysFor,
   ORIENTATIONS,
-  PAGE_SETUP_KEYS,
-  pageKeysFor,
   PAGE_SIZE_KEYS,
   PAINT_KEYS,
   PARAGRAPH_ALIGNS,
   PARAGRAPH_DIRECTIONS,
   paragraphKeysFor,
+  pageKeysFor,
+  pageSetupKeysFor,
   PARAGRAPH_METRIC_KEYS,
   RICH_TEXT_KEYS,
   runKeysFor,
@@ -105,6 +105,7 @@ import {
   expectRecord,
   expectString,
 } from './format';
+import { DEFAULT_MEASUREMENT_UNIT, MEASUREMENT_UNITS } from '../core/units/units';
 import { validateDocument } from '../model/invariants';
 import {
   clonePageSize,
@@ -330,7 +331,7 @@ function parseDocument(root: Record<string, unknown>, version: number): Document
       formatVersion: CURRENT_FORMAT_VERSION,
       id,
       name,
-      pageSetup: parsePageSetup(root['pageSetup']),
+      pageSetup: parsePageSetup(root['pageSetup'], version),
       // M23. A pre-v5 document has no `styles` key at all, and `documentKeysFor` has already
       // refused a v4 document that *does* carry one. So this is the whole migration: the absence of
       // the field becomes an empty list, and every object in it already reads `styleId: undefined`,
@@ -451,9 +452,9 @@ function parseCharFormat(input: unknown, path: string): CharFormat {
   return format;
 }
 
-function parsePageSetup(input: unknown): PageSetup {
+function parsePageSetup(input: unknown, version: number): PageSetup {
   const record = expectRecord(input, 'pageSetup');
-  expectOnlyKeys(record, 'pageSetup', PAGE_SETUP_KEYS);
+  expectOnlyKeys(record, 'pageSetup', pageSetupKeysFor(version));
   const resizeBehaviour = expectEnum(
     record['resizeBehaviour'],
     'pageSetup.resizeBehaviour',
@@ -463,6 +464,31 @@ function parsePageSetup(input: unknown): PageSetup {
     fixedSize: expectBoolean(record['fixedSize'], 'pageSetup.fixedSize'),
     defaultSize: parsePageSize(record['defaultSize'], 'pageSetup.defaultSize'),
     resizeBehaviour,
+    // M24, and the whole of the migration. A pre-v6 document has no `unit`, and
+    // `pageSetupKeysFor` has already refused one that *does* carry it -- so this is the absence
+    // becoming `DEFAULT_MEASUREMENT_UNIT`, and nothing else in the document is touched.
+    //
+    // The default is `mm` because `DEFAULT_PAGE_PRESET` has been A4-in-millimetres since before the
+    // format existed, which is what makes the migration **unobservable**: nothing stored is
+    // reinterpreted, because everything stored is px, and the only field being filled in is a
+    // display preference that previously had no value to lose.
+    //
+    // Deliberately *not* inferred from `defaultSize.unit`. That is the obvious-looking choice and it
+    // is wrong twice over. It would make the document's authoring unit a function of which paper
+    // preset happened to be selected, so choosing Letter would silently switch a millimetre document
+    // to inches -- the exact confusion the milestone separates `PageSize.unit` from
+    // `PageSetup.unit` in order to prevent. And it would let the unit of the *first* page leak into
+    // a document whose later pages differ.
+    //
+    // The `version` test rather than an `undefined` test, so the two failure modes stay distinct: a
+    // v6 document missing the key is refused by name, while a v5 document lacking it -- which is
+    // every v5 document -- reads as the default. Reading `undefined` as the default instead would
+    // make the required field optional in every version at once, and quietly accept a v6 file that
+    // a hand-edit had stripped.
+    unit:
+      version >= 6
+        ? expectEnum(record['unit'], 'pageSetup.unit', MEASUREMENT_UNITS)
+        : DEFAULT_MEASUREMENT_UNIT,
   });
 }
 

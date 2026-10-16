@@ -146,7 +146,7 @@ describe('migrating a version-1/2 document', () => {
 
   it('re-stamps the version, so the migration runs once', () => {
     expect(parse(legacyDoc()).formatVersion).toBe(CURRENT_FORMAT_VERSION);
-    expect(CURRENT_FORMAT_VERSION).toBe(5);
+    expect(CURRENT_FORMAT_VERSION).toBe(6);
   });
 
   it('writes a version-3 file whose pages carry their own size', () => {

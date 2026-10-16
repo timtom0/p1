@@ -77,6 +77,7 @@ function validDocument(): Record<string, unknown> {
       fixedSize: true,
       defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       resizeBehaviour: 'crop',
+      unit: 'mm',
     },
     // M23: "no styles" is an empty table, not an absent field.
     styles: [],

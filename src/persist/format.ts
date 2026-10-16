@@ -207,8 +207,29 @@ export function documentKeysFor(version: number): readonly string[] {
 
 export const PAGE_SIZE_KEYS = ['width', 'height', 'unit', 'orientation'] as const;
 
+/**
+ * Versions 3-5: a page setup carried no `unit`.
+ *
+ * Exists for the same reason `PRE_STYLE_DOCUMENT_KEYS` does, and M24 is the second user of that
+ * pattern: the key list is version-dependent, so the difference is stated once here rather than at
+ * each read site, and a v5 document carrying a `unit` is refused **by name** rather than opened and
+ * re-saved without one -- which would silently discard the author's choice, the exact loss the
+ * format's "refuse, do not drop" policy exists to prevent.
+ */
+export const PRE_UNIT_PAGE_SETUP_KEYS = ['fixedSize', 'defaultSize', 'resizeBehaviour'] as const;
+
 /** The document's page-setup keys. Version 3 and later only. */
-export const PAGE_SETUP_KEYS = ['fixedSize', 'defaultSize', 'resizeBehaviour'] as const;
+export const PAGE_SETUP_KEYS = [
+  'fixedSize',
+  'defaultSize',
+  'resizeBehaviour',
+  'unit',
+] as const;
+
+/** Which page-setup keys a document of `version` may carry. M24 added `unit` in v6. */
+export function pageSetupKeysFor(version: number): readonly string[] {
+  return version >= 6 ? PAGE_SETUP_KEYS : PRE_UNIT_PAGE_SETUP_KEYS;
+}
 
 export const PAGE_KEYS = ['id', 'name', 'size', 'background', 'objects'] as const;
 
