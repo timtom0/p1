@@ -44,7 +44,14 @@ import {
   type PageResizeBehaviour,
 } from '../model/page-setup';
 import type { Document, Page, PageSize } from '../model/types';
-import { isPhysicalUnit, type PhysicalUnit } from '../core/units/units';
+import {
+  MEASUREMENT_UNITS,
+  PRECISION_BY_UNIT,
+  fromPx,
+  isPhysicalUnit,
+  toPx,
+} from '../core/units/units';
+import type { PhysicalUnit } from '../core/units/units';
 
 export interface PagePanelOptions {
   /**
@@ -191,13 +198,33 @@ export function mountPagePanel(
 
   const widthInput = el('input', { type: 'number', min: '1', step: 'any', 'data-page-width': '' });
   const heightInput = el('input', { type: 'number', min: '1', step: 'any', 'data-page-height': '' });
+  /**
+   * The **focused page's** unit, not the document's. M24.
+   *
+   * This is the other half of the split the milestone introduces, and it is load-bearing for print:
+   * `printSheetSize` reads `page.size.unit` to write `@page { size: … }`, so the unit a page is
+   * stored in is the size of the paper the PDF asks for. The document's unit governs measurement
+   * fields and lives in the document defaults section below.
+   */
   const unitSelect = el('select', { 'data-page-unit': '' });
-  for (const unit of ['mm', 'cm', 'in', 'pt'] as const) {
+  for (const unit of MEASUREMENT_UNITS) {
     unitSelect.append(el('option', { value: unit }, unit));
   }
   const landscapeInput = el('input', { type: 'checkbox', 'data-page-landscape': '' });
 
-  const readSize = (): PageSize | null => {
+  /**
+ * One physical length, restated in another unit, at that unit's own display precision.
+ *
+ * Rounded rather than kept exact because it is going straight into a box a person will read and
+ * then possibly re-read: a page width of `210.00000000000003mm` in a box showing millimetres is a
+ * number no one typed. The rounding is a *display* decision and the physical size is unchanged by
+ * it beyond a hundredth of the coarsest unit -- far below the pixel the renderer works in.
+ */
+function convertTo(value: number, from: PhysicalUnit, to: PhysicalUnit): number {
+  return Number(fromPx(toPx(value, from), to).toFixed(PRECISION_BY_UNIT[to]));
+}
+
+const readSize = (): PageSize | null => {
     const width = Number(widthInput.value);
     const height = Number(heightInput.value);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
@@ -232,7 +259,18 @@ export function mountPagePanel(
     if (page === undefined) return;
     // Orientation is the user's, not the preset's: switching from A4 to Letter should not silently
     // flip a landscape page back to portrait.
-    const size: PageSize = { ...clonePageSize(preset.size), orientation: page.size.orientation };
+    //
+    // And the unit is the *page's*, not the preset's. A preset carries its own unit because the
+    // paper is stated in its own units; carrying it over would mean choosing Letter in a
+    // millimetre document changed the page's unit as a side effect of choosing a sheet size -- the
+    // same leak the New Document dialog had. Converting keeps the same physical sheet in the unit
+    // the page was already in.
+    const size: PageSize = {
+      width: convertTo(preset.size.width, preset.size.unit, page.size.unit),
+      height: convertTo(preset.size.height, preset.size.unit, page.size.unit),
+      unit: page.size.unit,
+      orientation: page.size.orientation,
+    };
     if (pageSizesEqual(page.size, size)) return;
     commit({ type: 'setPageSize', pageId: page.id, size });
   });
@@ -249,6 +287,23 @@ export function mountPagePanel(
   for (const behaviour of PAGE_RESIZE_BEHAVIOURS) {
     resizeSelect.append(el('option', { value: behaviour }, RESIZE_LABELS[behaviour]));
   }
+
+  /**
+   * The **document's** measurement unit, M24 -- as opposed to the page's unit above, which is the
+   * size of the paper.
+   *
+   * Committed through `setPageSetup`, so changing it is one undo step and lands in the same history
+   * as everything else the panel edits. The reducer's no-op guard compares `unit`, so choosing the
+   * unit a document already has records nothing.
+   */
+  const documentUnitSelect = el('select', { 'data-document-unit': '' });
+  for (const unit of MEASUREMENT_UNITS) {
+    documentUnitSelect.append(el('option', { value: unit }, unit));
+  }
+  documentUnitSelect.addEventListener('change', () => {
+    if (!isPhysicalUnit(documentUnitSelect.value)) return;
+    commit({ type: 'setPageSetup', setup: { unit: documentUnitSelect.value } });
+  });
 
   fixedSizeInput.addEventListener('change', () =>
     commit({ type: 'setPageSetup', setup: { fixedSize: fixedSizeInput.checked } }),
@@ -282,6 +337,15 @@ export function mountPagePanel(
 
   const setupSection = el('section', { class: 'p1-pages__section' });
   setupSection.append(
+    el('h3', {}, 'Measurements'),
+    el(
+      'p',
+      { class: 'p1-pages__note' },
+      'The unit every measurement field, ruler and readout in this document uses. It changes what ' +
+        'those fields say about the same value; it does not move anything. A page keeps the unit it ' +
+        'is sized in, which is what the PDF asks the printer for.',
+    ),
+    field('Measure in', documentUnitSelect),
     el('h3', {}, 'New pages'),
     field(fixedSizeInput, 'Fixed page size'),
     el(
@@ -359,6 +423,7 @@ export function mountPagePanel(
     }
 
     fixedSizeInput.checked = current.pageSetup.fixedSize;
+    setSelectValue(documentUnitSelect, current.pageSetup.unit);
     setSelectValue(setupPresetSelect, findPageSizePreset(current.pageSetup.defaultSize)?.id ?? DEFAULT_PAGE_PRESET.id);
     setSelectValue(resizeSelect, current.pageSetup.resizeBehaviour);
   };

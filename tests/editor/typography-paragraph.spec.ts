@@ -57,7 +57,7 @@ function fixtureWith(paragraphFields: readonly string[], text: readonly string[]
     .join(', ');
   return `() => ({
     formatVersion: 4, id: 'para', name: 'Paragraphs',
-    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{

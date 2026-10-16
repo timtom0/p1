@@ -1109,7 +1109,7 @@ const LAYER_FIXTURE = `() => {
   });
   return {
     formatVersion: 3, id: 'layers', name: 'Layers',
-    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{
@@ -1161,7 +1161,7 @@ const overlapFixture = (underId: string, overId: string, lockOver: boolean) => `
   });
   return {
     formatVersion: 3, id: 'overlap', name: 'Overlap',
-    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{
@@ -1188,7 +1188,7 @@ const ROTATED = { id: 'node_rot', name: 'Rot', x: 80, y: 80, width: 200, height:
 
 const ROTATED_FIXTURE = `() => ({
   formatVersion: 3, id: 'rot', name: 'Rotated',
-  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -1209,7 +1209,7 @@ const ROTATED_FIXTURE = `() => ({
 /** A rect and a text frame, for the mixed-type selection. */
 const MIXED_FIXTURE = `() => ({
   formatVersion: 3, id: 'mixed', name: 'Mixed',
-  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{

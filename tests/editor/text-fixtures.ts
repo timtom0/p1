@@ -24,7 +24,7 @@ export const EMPTY_IDS = {
 /** Three paragraphs, four formats, a soft break, and frame typography. */
 export const TEXT_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
-  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -59,7 +59,7 @@ export const TEXT_FIXTURE = `() => ({
 /** A single empty paragraph. */
 export const EMPTY_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
-  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -87,7 +87,7 @@ export const EMPTY_FIXTURE = `() => ({
  */
 export const BLANK_LINE_FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
-  pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -115,7 +115,7 @@ export const OVERFLOW_FIXTURE = `() => {
   }
   return {
     formatVersion: 3, id: 'f', name: 'F',
-    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{

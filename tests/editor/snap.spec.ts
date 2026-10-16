@@ -585,7 +585,7 @@ test.describe('snap state never reaches the document', () => {
           formatVersion: 3,
           id: 'x',
           name: 'X',
-          pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
           styles: [],
           assets: {},
           guides: [],

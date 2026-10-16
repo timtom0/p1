@@ -207,6 +207,40 @@ describe('injected document fixtures', () => {
     expect(fieldsMissingFrom(literals, 'styles'), MISSING_FIELD_MESSAGE('styles', 'styles: []')).toEqual([]);
   });
 
+  it('every document literal declares a page setup unit of its own', () => {
+    // The M24 hole, and the third time this file has had to be extended rather than the literals
+    // repaired. `window.__P1_FIXTURE__` is handed to the store **verbatim**, so a fixture that predates
+    // a required model field reaches the app without it -- there is no deserialiser in the path to
+    // fill it in. The symptom was `NaNundefined` in every measurement field: `formatLength(px,
+    // undefined)` appends the unit to a number that had already become NaN, so the failure looked
+    // like arithmetic rather than like a missing preference.
+    //
+    // Matched by position rather than by the word `unit`, because `defaultSize.unit` is the **page's**
+    // unit and every fixture has one. Only a `unit` appearing before `defaultSize` is the page
+    // setup's own, which is exactly the sibling relationship the model requires.
+    const missing: string[] = [];
+    for (const literal of literals) {
+      const source = readFileSync(literal.file, 'utf8');
+      // From `literal.after` -- just past this literal's own `pageSetup: {` -- to the next one. The
+      // other two field checks slice the same window for the same reason; starting the slice at
+      // `source.indexOf('pageSetup:', …)` instead would start at the *following* literal and check
+      // the wrong document, which is the version of this bug the file's own header warns about.
+      const next = source.indexOf('pageSetup:', literal.after);
+      const end = next === -1 ? source.length : next;
+      const statement = source.slice(literal.after, end);
+      const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
+      if (!/unit[ \t]*:/.test(beforeDefault)) {
+        missing.push(`${testRelativePath(literal.file)}:${literal.line}`);
+      }
+    }
+    expect(
+      missing,
+      'these document literals declare no `pageSetup.unit`, so every measurement in this document ' +
+        'renders as NaNundefined. Add `unit: \'mm\'` alongside `fixedSize` -- ahead of `defaultSize`, ' +
+        'whose own `unit` is the page\'s and means something different.',
+    ).toEqual([]);
+  });
+
   it('every page literal declares its own `size`', () => {
     // The M20 hole. `Page.size` is required, so a page without one throws during the first
     // render and the app never reaches `boot:complete` -- which is what made seven of these

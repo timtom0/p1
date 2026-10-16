@@ -89,7 +89,7 @@ async function mountMixed(page: Page, sizes: readonly PageSize[]): Promise<void>
     name: 'Mixed',
     // fixture-guards.test.ts finds document literals by this field and checks the rest of
     // the literal forwards from it, so the assets key above is what it looks for.
-    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: ${JSON.stringify(sizes)}.map((size, index) => ({

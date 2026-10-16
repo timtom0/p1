@@ -60,7 +60,7 @@ test('landscape orientation swaps the page box', async ({ page }) => {
     page,
     `() => ({
       formatVersion: 3, id: 'doc_l', name: 'landscape',
-      pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'landscape' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'landscape' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'page_1', name: '1',
@@ -174,7 +174,7 @@ test('page clips overflowing objects with overflow:hidden', async ({ page }) => 
     page,
     `() => ({
       formatVersion: 3, id: 'doc_c', name: 'clip',
-      pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'page_1', name: '1',
@@ -246,7 +246,7 @@ test('later objects paint over earlier ones', async ({ page }) => {
       const blue = make('b_top', '#0000ff');
       return {
         formatVersion: 3, id: 'doc_p', name: 'paint order',
-        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         styles: [],
         assets: {},
         pages: [{ id: 'page_1', name: '1',
@@ -509,7 +509,7 @@ function rectFixture(t: {
 }): string {
   return `() => ({
     formatVersion: 3, id: 'doc_x', name: 'geometry',
-    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{ id: 'page_1', name: '1',

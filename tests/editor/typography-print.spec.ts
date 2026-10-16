@@ -32,7 +32,7 @@ import { mountFixture } from '../visual/harness';
 /** A two-frame document: two families, two sizes, mixed formatting, alignment, and a soft break. */
 const TYPOGRAPHY_FIXTURE = `() => ({
   formatVersion: 3, id: 'typo', name: 'Typography',
-  pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -74,7 +74,7 @@ const TYPOGRAPHY_FIXTURE = `() => ({
 /** The Arabic frame, kept separate because its content stream is asserted on its own. */
 const ARABIC_FIXTURE = `() => ({
   formatVersion: 3, id: 'arabic', name: 'Arabic',
-  pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{

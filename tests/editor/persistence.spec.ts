@@ -261,7 +261,7 @@ test.describe('save and reopen', () => {
     // depends on it: the document is saved from the running app like any other.
     const source = `() => ({
       formatVersion: 3, id: 'multi', name: 'Multi',
-      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [
@@ -340,7 +340,7 @@ test.describe('save and reopen', () => {
   }) => {
     const source = `() => ({
       formatVersion: 3, id: 'kinds', name: 'Kinds',
-      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
@@ -382,7 +382,7 @@ test.describe('save and reopen', () => {
   test('transformed objects round-trip, including rotation and scale', async ({ browser }) => {
     const source = `() => ({
       formatVersion: 3, id: 'xf', name: 'Transformed',
-      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
@@ -494,7 +494,7 @@ test.describe('assets', () => {
       formatVersion: 5,
       id: 'doc_ext',
       name: 'External',
-      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       // Format 5, like every other loaded document here: this one is parsed, not injected, so its
       // version is load-bearing and styles is a field it must declare.
       styles: [],
@@ -579,7 +579,7 @@ test.describe('refused documents', () => {
       name: 'Base',
       pageSetup: {
         fixedSize: true,
-        defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+        unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
         resizeBehaviour: 'crop',
       },
       styles: [],
