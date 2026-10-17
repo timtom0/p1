@@ -38,7 +38,7 @@ import type { PropertySpec } from '../model/shapes';
 import { defaultStroke } from '../model/creation';
 import { findNode } from '../editor/selection';
 import type { CharFlag } from '../model/rich-text';
-import { formatLength, parseLength } from '../core/units/units';
+import { formatLength, parseLength, readLength, type ParseProblem } from '../core/units/units';
 import type { MeasurementUnit, PhysicalUnit } from '../core/units/units';
 import { createStylesPanel } from './styles-panel';
 import { registerStyleActions, styleUi } from './style-ui';
@@ -372,6 +372,28 @@ export function mountInspector(
 function unchanged(input: HTMLInputElement): boolean {
   return input.value.trim() === (input.dataset['shown'] ?? '');
 }
+/**
+ * What a field says when it refuses a value. M24.
+ *
+ * The alternative -- highlighting the box and saying nothing -- is what this panel did, and it is
+ * why the unit milestone had to add `readLength` and then find a caller for it: a field that shows
+ * the old number after refusing the new one, with no explanation, reads as a bug in the app rather
+ * than as the app declining to guess.
+ *
+ * "Not a number" and "unknown unit" are kept apart because they are different mistakes and the
+ * remedy is different. Someone who typed `12em` almost certainly meant millimetres and misspelled
+ * it; telling them it is not a number sends them looking for a typo that is not there.
+ */
+function problemMessage(problem: ParseProblem): string {
+  switch (problem) {
+    case 'unknown-unit':
+      return 'Rotulus does not know that unit. Use mm, cm, in, pt or pc, or type a bare number for this document\'s unit.';
+    case 'empty':
+      return 'Empty means "no value set" here. Leave it alone to keep the default.';
+    default:
+      return 'That is not a number.';
+  }
+}
   function commit(field: FieldSpec, input: HTMLInputElement): void {
     const ids = [...editor.selectionState.ids];
     if (ids.length === 0) return;
@@ -389,13 +411,16 @@ function unchanged(input: HTMLInputElement): boolean {
     // selecting another is not an edit.
     if (unchanged(input)) return;
 
-    const parsed = field.unit === 'deg' ? parseDegrees(raw) : parseLength(raw, unit());
+    const read = field.unit === 'deg' ? null : readLength(raw, unit());
+    const parsed = field.unit === 'deg' ? parseDegrees(raw) : (read?.px ?? null);
     if (parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title = read?.problem === undefined ? 'That is not a number.' : problemMessage(read.problem);
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
+    input.title = '';
 
     // One transaction per commit: a single undo step, regardless of how the value
     // got there.
@@ -517,6 +542,8 @@ function unchanged(input: HTMLInputElement): boolean {
     if (parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title =
+      input.title = field.kind === 'length' ? problemMessage(readLength(raw, unit()).problem ?? 'not-a-number') : 'That is not a value this property accepts.';
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
@@ -1200,6 +1227,8 @@ function textFieldUnit(field: TextFieldSpec): MeasurementUnit | 'pt' {
     if (raw !== '' && parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title =
+      input.title = field.kind === 'length' ? problemMessage(readLength(raw, textFieldUnit(field)).problem ?? 'not-a-number') : 'That is not a value this property accepts.';
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
@@ -1240,6 +1269,7 @@ function textFieldUnit(field: TextFieldSpec): MeasurementUnit | 'pt' {
     if (raw !== '' && parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title = problemMessage(readLength(raw, unit()).problem ?? 'not-a-number');
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');

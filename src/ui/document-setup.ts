@@ -145,57 +145,71 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
   document.body.append(dialog);
 
   /**
-   * Writes a preset's dimensions into the width and height boxes **in the document's unit**.
+   * The unit the width and height boxes are currently expressed in.
    *
-   * The conversion is the point. `A4` is 210x297mm and `Letter` is 8.5x11in, and both are the
-   * same physical sheet size once converted; showing them in the unit the user chose is what makes
-   * the unit control a *display* choice rather than a second thing that decides the paper. The old
-   * code wrote the preset's own numbers and then set the unit dropdown to match, which is how
-   * selecting Letter silently turned a millimetre document into an inch one.
+   * A variable rather than read from the select, and that is the whole fix for a bug the first cut
+   * had: the `change` event fires *after* the control's value has changed, so reading it there
+   * gives the new unit for both sides of the conversion and the conversion silently does nothing.
+   * Tracking what the boxes hold is the only version of this that can tell "210 in mm" from "210 in
+   * inches" once the user has moved on.
+   */
+  let inputsAreIn: MeasurementUnit = DEFAULT_MEASUREMENT_UNIT;
+
+  /** The unit the dropdown is set to, falling back to the default rather than trusting the DOM. */
+  const currentUnit = (): MeasurementUnit =>
+    isMeasurementUnit(unitSelect.value) ? unitSelect.value : DEFAULT_MEASUREMENT_UNIT;
+
+  /** Writes both boxes, recording the unit they are in. The only writer of `inputsAreIn`. */
+  const writeInputs = (width: number, height: number, unit: MeasurementUnit): void => {
+    const precision = PRECISION_BY_UNIT[unit];
+    widthInput.value = String(Number(width.toFixed(precision)));
+    heightInput.value = String(Number(height.toFixed(precision)));
+    inputsAreIn = unit;
+  };
+
+  /**
+   * Writes a preset's dimensions into the boxes **in the document's unit**.
    *
-   * Rounded to the unit's own display precision, because a box showing `595.2755905511811pt` is not
-   * a number a person would have typed. The stored value is recomputed from the physical size on
-   * save, so the rounding shown here is a display artefact and not a document change.
+   * The conversion is the point. `A4` is 210x297mm and `Letter` is 8.5x11in, and both are the same
+   * physical sheet once converted; showing them in the unit the user chose is what makes the unit
+   * control a *display* choice rather than a second thing that decides the paper. The old code wrote
+   * the preset's own numbers and then set the unit dropdown to match, which is how selecting Letter
+   * silently turned a millimetre document into an inch one.
    */
   const applyPresetToInputs = (presetId: string): void => {
     const preset = PAGE_SIZE_PRESETS.find((candidate) => candidate.id === presetId);
     if (preset === undefined) return;
     const unit = currentUnit();
-    widthInput.value = String(Number(fromPx(toPx(preset.size.width, preset.size.unit), unit).toFixed(PRECISION_BY_UNIT[unit])));
-    heightInput.value = String(Number(fromPx(toPx(preset.size.height, preset.size.unit), unit).toFixed(PRECISION_BY_UNIT[unit])));
+    writeInputs(
+      fromPx(toPx(preset.size.width, preset.size.unit), unit),
+      fromPx(toPx(preset.size.height, preset.size.unit), unit),
+      unit,
+    );
   };
-
-  /** The unit the dialog is currently showing in, falling back to the default rather than trusting the DOM. */
-  const currentUnit = (): MeasurementUnit =>
-    isMeasurementUnit(unitSelect.value) ? unitSelect.value : DEFAULT_MEASUREMENT_UNIT;
 
   /**
    * Re-writes the width and height into the newly chosen unit, *keeping the same paper*.
    *
-   * This is the difference between "change the unit" and "rescale the page", and getting it wrong
-   * is the single most destructive thing this dialog could do: treating the numbers as belonging to
-   * the old unit would turn an A4 page into a 210in x 297in one. So the current numbers are read,
-   * converted to px *through the unit they were typed in*, and written back out in the new one.
+   * This is the difference between "change the unit" and "rescale the page", and getting it wrong is
+   * the single most destructive thing this dialog could do: reading the numbers as belonging to the
+   * old unit would turn an A4 page into a 210in x 297in one.
    */
-  const convertInputsToUnit = (): void => {
-    const from = currentUnit();
+  const convertInputsToUnit = (to: MeasurementUnit): void => {
+    const from = inputsAreIn;
+    if (from === to) {
+      inputsAreIn = to;
+      return;
+    }
     const width = Number(widthInput.value);
     const height = Number(heightInput.value);
+    // A box the user has typed something unparseable into is left alone, including the unit. The
+    // error only surfaces on Create, so silently discarding what they typed here would lose it.
     if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-    unitSelect.value = from;
-    const to = currentUnit();
-    if (from === to) return;
-    const precision = PRECISION_BY_UNIT[to];
-    widthInput.value = String(Number(fromPx(toPx(width, from), to).toFixed(precision)));
-    heightInput.value = String(Number(fromPx(toPx(height, from), to).toFixed(precision)));
+    writeInputs(fromPx(toPx(width, from), to), fromPx(toPx(height, from), to), to);
   };
 
   presetSelect.addEventListener('change', () => applyPresetToInputs(presetSelect.value));
-  unitSelect.addEventListener('change', () => {
-    const chosen = currentUnit();
-    unitSelect.value = chosen;
-    convertInputsToUnit();
-  });
+  unitSelect.addEventListener('change', () => convertInputsToUnit(currentUnit()));
 
   cancelButton.addEventListener('click', () => dialog.close('cancel'));
 
@@ -213,11 +227,13 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
             pageSizesEqual(preset.size, { ...setup.defaultSize, unit }) &&
             preset.size.orientation === setup.defaultSize.orientation,
         )?.id ?? '__custom';
-      widthInput.value = String(
-        Number(fromPx(toPx(setup.defaultSize.width, setup.defaultSize.unit), unit).toFixed(PRECISION_BY_UNIT[unit])),
-      );
-      heightInput.value = String(
-        Number(fromPx(toPx(setup.defaultSize.height, setup.defaultSize.unit), unit).toFixed(PRECISION_BY_UNIT[unit])),
+      // Through `writeInputs`, so the unit the boxes are in is recorded -- otherwise the *first* unit
+      // change after opening would convert from whatever the previous dialog left behind, and a
+      // cancelled-then-reopened dialog would rescale a page on the next change.
+      writeInputs(
+        fromPx(toPx(setup.defaultSize.width, setup.defaultSize.unit), unit),
+        fromPx(toPx(setup.defaultSize.height, setup.defaultSize.unit), unit),
+        unit,
       );
       unitSelect.value = unit;
       landscapeInput.checked = setup.defaultSize.orientation === 'landscape';
