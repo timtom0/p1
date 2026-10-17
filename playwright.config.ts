@@ -52,22 +52,61 @@ function envPort(name: string, fallback: number): number {
 }
 
 /**
- * Browser viewport for the visual suite.
+ * Browser viewport.
  *
- * Sized so a whole A4 page (794×1123) fits at the *highest* zoom level under
- * test (195%, giving ≈1550×2190) with room to spare, and with the chrome
- * subtracted: the 300px dev panel takes width, and the toolbar plus rulers take
- * height.
+ * ## Why this is configurable, and why the default did not move
  *
- * This lets every screenshot be a single clipped viewport capture, which is both
- * fast and complete — see `screenshotPage` in harness.ts for why the alternatives
- * (locator screenshots, `fullPage`) do not work, and why a page that does not fit
- * must fail loudly rather than capture the surrounding chrome.
+ * The obvious saving is that a viewport is not free: every repaint rasters its full area, and
+ * 2400x2600 is 6.2 megapixels. So `P1_VIEWPORT=WIDTHxHEIGHT` exists, and is validated.
  *
- * Note these dimensions are a test concern, not a product requirement: a real
- * user window is far smaller, and the code under test must not depend on them.
+ * **Measured on this machine, 3 repeats of a single boot, alternating** -- the run-to-run spread
+ * here is large enough that a single sample is worthless, which is exactly what a first, un-repeated
+ * measurement said (it claimed 2.3x; the truth is below):
+ *
+ * | viewport | boot |
+ * |---|---|
+ * | 2400x2600 (the default) | 1.7 / 1.5 / 1.6s -- **1.60s** |
+ * | 1600x1000 | 1.3 / 1.3 / 1.4s -- **1.33s** |
+ * | 2400x1400 | 1.2s |
+ * | 1280x900 | 1.4s |
+ *
+ * The ceiling on this lever is about **17% of boot time**, and it scales with *height* rather than
+ * area: 2400x1400 has three times the pixels of 1280x900 and boots no slower.
+ *
+ * ## Why it is not the default
+ *
+ * Because it is not free, and the bill arrives as **input tests silently selecting nothing**. At
+ * 1600x1000 and again at 2400x1400, `group-geometry.spec.ts` fails eight hit-testing and
+ * text-editing tests. A document point that is on the page at one size is *below the fold* at
+ * another; `page.mouse.click` takes viewport coordinates, so the click lands outside the window and
+ * selects nothing. Nothing fails loudly -- the assertion just sees an empty selection.
+ *
+ * The cause is in the harness rather than here: `clientPointAt` maps a document point to client
+ * coordinates and **does not scroll**, so its answer silently depends on the viewport.
+ * `clickablePointAt` (added for M24) does scroll and does verify, which is why the specs that use it
+ * keep working at any size.
+ *
+ * Making the small viewport the default would mean either a suite that quietly loses input coverage
+ * or a large refactor of helpers twenty-odd specs share. Neither belongs in a config change. So the
+ * default stays large, `npm run sweep` does not set this, and the knob is here for the case that
+ * actually wants it: a fast smoke run over specs that are not gesture-driven.
  */
-const VIEWPORT = { width: 2400, height: 2600 };
+function viewport(): { width: number; height: number } {
+  const raw = process.env['P1_VIEWPORT'];
+  if (raw === undefined || raw === '') return { width: 2400, height: 2600 };
+  const parts = raw.split('x').map((part) => Number.parseInt(part, 10));
+  const w = parts[0] as number | undefined;
+  const h = parts[1] as number | undefined;
+  if (w === undefined || h === undefined || !Number.isInteger(w) || !Number.isInteger(h)) {
+    throw new Error(`P1_VIEWPORT must be WIDTHxHEIGHT, got "${raw}"`);
+  }
+  if (w < 200 || h < 200) {
+    throw new Error(`P1_VIEWPORT must have both dimensions at least 200, got "${raw}"`);
+  }
+  return { width: w, height: h };
+}
+
+const VIEWPORT = viewport();
 
 export default defineConfig({
   // Only the visual + spike suites; unit tests are Vitest's job (`npm test`).
