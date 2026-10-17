@@ -141,6 +141,45 @@ function findUnsizedPages(file: string): string[] {
 }
 
 /**
+ * Literals that carry no `pageSetup.unit` **on purpose**, and why.
+ *
+ * The same discipline as {@link DELIBERATELY_UNSIZED}: each entry must still have the literal it
+ * exists for, or the suite fails and the entry has to go. A stale exemption is a hole with a
+ * comment on it.
+ *
+ * All three are the same case and it is the exception the guard's own premise does not cover. Every
+ * other document literal in these files is an **injected** fixture, handed to the store verbatim,
+ * which is why it needs the field spelled out. These three are **loaded** through the file input, so
+ * they go through the deserialiser -- and they declare `formatVersion: 5`, for which the migration
+ * supplies the default. Writing a `unit` into one would be refused by name, which is the correct
+ * answer and not the one these tests are about.
+ *
+ * So they are not un-guarded; they are guarded by a different rule, the one in
+ * `version6-units.test.ts`.
+ */
+const DELIBERATELY_UNUNITED: Readonly<Record<string, string>> = {
+  'editor/persistence.spec.ts:501': 'loaded through the file input at format 5; the migration supplies the unit',
+  'editor/persistence.spec.ts:583': 'the refusal base, loaded at format 5; the migration supplies the unit',
+  'editor/print.spec.ts:295': 'opened through the file input at format 5, which also covers the migration',
+};
+
+/** The `path:line` keys of every literal with no `pageSetup.unit`, exemptions aside. */
+function missingUnits(literals: readonly DocumentLiteral[]): string[] {
+  const absent: string[] = [];
+  for (const literal of literals) {
+    const source = readFileSync(literal.file, 'utf8');
+    const next = source.indexOf('pageSetup:', literal.after);
+    const end = next === -1 ? source.length : next;
+    const statement = source.slice(literal.after, end);
+    const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
+    if (!/unit[ \t]*:/.test(beforeDefault)) {
+      absent.push(`${testRelativePath(literal.file)}:${literal.line}`);
+    }
+  }
+  return absent;
+}
+
+/**
  * `path:line` for each literal in `literals` whose body does not mention `field`.
  *
  * ## Why this is a function and not the loop it replaced
@@ -205,6 +244,54 @@ describe('injected document fixtures', () => {
     // `styles: []` is the right default rather than a sentinel: a document with no style
     // definitions is an ordinary document, and it is what the factory produces.
     expect(fieldsMissingFrom(literals, 'styles'), MISSING_FIELD_MESSAGE('styles', 'styles: []')).toEqual([]);
+  });
+
+  it('every document literal declares a page setup unit of its own', () => {
+    // The M24 hole, and the third time this file has had to be extended rather than the literals
+    // repaired. `window.__P1_FIXTURE__` is handed to the store **verbatim**, so a fixture that predates
+    // a required model field reaches the app without it -- there is no deserialiser in the path to
+    // fill it in. The symptom was `NaNundefined` in every measurement field: `formatLength(px,
+    // undefined)` appends the unit to a number that had already become NaN, so the failure looked
+    // like arithmetic rather than like a missing preference.
+    //
+    // Matched by position rather than by the word `unit`, because `defaultSize.unit` is the **page's**
+    // unit and every fixture has one. Only a `unit` appearing before `defaultSize` is the page
+    // setup's own, which is exactly the sibling relationship the model requires.
+    const missing: string[] = [];
+    for (const literal of literals) {
+      const source = readFileSync(literal.file, 'utf8');
+      // From `literal.after` -- just past this literal's own `pageSetup: {` -- to the next one. The
+      // other two field checks slice the same window for the same reason; starting the slice at
+      // `source.indexOf('pageSetup:', …)` instead would start at the *following* literal and check
+      // the wrong document, which is the version of this bug the file's own header warns about.
+      const next = source.indexOf('pageSetup:', literal.after);
+      const end = next === -1 ? source.length : next;
+      const statement = source.slice(literal.after, end);
+      const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
+      if (/unit[ \t]*:/.test(beforeDefault)) continue;
+      const key = `${testRelativePath(literal.file)}:${literal.line}`;
+      if (DELIBERATELY_UNUNITED[key] !== undefined) continue;
+      missing.push(key);
+    }
+    expect(
+      missing,
+      'these document literals declare no `pageSetup.unit`, so every measurement in this document ' +
+        'renders as NaNundefined. Add `unit: \'mm\'` alongside `fixedSize` -- ahead of `defaultSize`, ' +
+        'whose own `unit` is the page\'s and means something different.',
+    ).toEqual([]);
+  });
+
+  it('every unit exemption is still needed', () => {
+    // An exemption that outlives its reason is a hole with a comment on it. If one of those three
+    // documents is ever made current-version -- or is ever injected rather than loaded -- this fails
+    // and the entry has to go, which is the point of writing it down at all.
+    const live = new Set(missingUnits(literals));
+    const stale = Object.keys(DELIBERATELY_UNUNITED).filter((key) => !live.has(key));
+    expect(
+      stale,
+      'these literals are exempt from the page-setup `unit` rule but now declare one, so the ' +
+        'exemption is dead weight. Delete the entry and the literal goes under the rule.',
+    ).toEqual([]);
   });
 
   it('every page literal declares its own `size`', () => {

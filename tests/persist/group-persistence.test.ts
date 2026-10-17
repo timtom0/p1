@@ -99,6 +99,7 @@ function documentWith(objects: unknown[], assets: Record<string, unknown> = {}):
     name: 'Groups',
     pageSetup: {
       fixedSize: true,
+      unit: 'mm',
       defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },

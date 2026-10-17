@@ -48,7 +48,7 @@ export const GROUPS = `() => {
     format: 'p1doc',
     id: 'grouped',
     name: 'Grouped kinds',
-    pageSetup: { fixedSize: true, defaultSize: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 900, height: 800, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {
       a1: {

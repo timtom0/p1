@@ -293,10 +293,9 @@ export function createStylesPanel(
         category,
         suggestedName: suggestedName(editor.doc, category),
         formatLength: (value) => formatLength(value, unit()),
-        parseLength: (raw) => {
-          const hasUnit = /[a-z]+\s*$/i.test(raw.trim());
-          return parseLength(hasUnit ? raw : `${raw}${unit()}`) ?? undefined;
-        },
+        // M24: the shared parser takes the default unit, so the private copies of "is there
+        // a suffix, and if not add the unit" this milestone found collapse to one call.
+        parseLength: (raw) => parseLength(raw, unit()) ?? undefined,
       });
       if (built === null) return;
       const ids = selectionIds();
@@ -322,10 +321,9 @@ export function createStylesPanel(
         category: style.kind,
         suggestedName: style.name,
         formatLength: (value) => formatLength(value, unit()),
-        parseLength: (raw) => {
-          const hasUnit = /[a-z]+\s*$/i.test(raw.trim());
-          return parseLength(hasUnit ? raw : `${raw}${unit()}`) ?? undefined;
-        },
+        // M24: the shared parser takes the default unit, so the private copies of "is there
+        // a suffix, and if not add the unit" this milestone found collapse to one call.
+        parseLength: (raw) => parseLength(raw, unit()) ?? undefined,
       });
       if (built === null) return;
       // `updateStyle` replaces rather than merges, so a property cleared in the dialog stops being

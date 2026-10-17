@@ -26,6 +26,8 @@
  * See ADR 0019 for the decision, the compatibility strategy, and the PDF implications.
  */
 
+import { DEFAULT_MEASUREMENT_UNIT } from '../core/units/units';
+import type { MeasurementUnit } from '../core/units/units';
 import type { Orientation, PageSize } from './types';
 
 /**
@@ -48,6 +50,34 @@ export type PageResizeBehaviour = 'crop' | 'push' | 'scale';
 export const PAGE_RESIZE_BEHAVIOURS: readonly PageResizeBehaviour[] = ['crop', 'push', 'scale'];
 
 export interface PageSetup {
+  /**
+   * The unit every **measurement field** in this document is shown and typed in. M24.
+   *
+   * ## What it is not
+   *
+   * It is not the internal unit (that is CSS `px`, for every document), and it is **not**
+   * {@link PageSize.unit}. A page's unit says what its dimensions are *written in*, and it is
+   * per-page, and `printSheetSize` reads it to emit `@page { size: 210mm 297mm }` -- so a Letter
+   * page in a millimetre document is an ordinary document rather than a contradiction. This field
+   * says what a measurement field in the inspector, a ruler tick or a pointer readout means when
+   * the user types a bare number into it.
+   *
+   * Those are two questions and M24 exists to stop them being answered by the same field. Before it,
+   * `app.ts` derived the display unit from the *focused page*, which meant a mixed-unit document
+   * changed its ruler units as the user scrolled and had no unit of its own to persist.
+   *
+   * ## Defaults
+   *
+   * `mm`, because `DEFAULT_PAGE_PRESET` has been A4-in-millimetres since before the format existed.
+   * That makes the default unobservable: a document created with no explicit unit, and a pre-v6 file
+   * that migrates, both keep the page dimensions they always had.
+   *
+   * ## Changing it
+   *
+   * Changes interpretation and display, and **nothing else**. No stored number is reinterpreted and
+   * no page's `unit` is touched, because the stored numbers are px and px does not depend on this.
+   */
+  unit: MeasurementUnit;
   /**
    * When true, a newly added page always takes {@link defaultSize}.
    *
@@ -125,6 +155,7 @@ export function createPageSetup(init: Partial<PageSetup> = {}): PageSetup {
   return {
     fixedSize: true,
     resizeBehaviour: 'crop',
+    unit: DEFAULT_MEASUREMENT_UNIT,
     ...init,
     // Placed last and cloned rather than spread, for two reasons. It must win over `init` so the
     // default is always a copy this document owns; and the preset table is frozen while a caller's

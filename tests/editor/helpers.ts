@@ -61,7 +61,7 @@ export const FIXTURE = `() => {
     formatVersion: 3,
     id: 'fixture',
     name: 'Fixture',
-    pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{

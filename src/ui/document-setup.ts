@@ -27,8 +27,23 @@
 
 import { el } from './dom';
 import { createDocument } from '../model/factory';
-import { createPageSetup, PAGE_RESIZE_BEHAVIOURS, PAGE_SIZE_PRESETS, clonePageSize, type PageResizeBehaviour } from '../model/page-setup';
-import { isPhysicalUnit, type PhysicalUnit } from '../core/units/units';
+import {
+  createPageSetup,
+  PAGE_RESIZE_BEHAVIOURS,
+  PAGE_SIZE_PRESETS,
+  clonePageSize,
+  pageSizesEqual,
+  type PageResizeBehaviour,
+} from '../model/page-setup';
+import {
+  DEFAULT_MEASUREMENT_UNIT,
+  MEASUREMENT_UNITS,
+  PRECISION_BY_UNIT,
+  fromPx,
+  isMeasurementUnit,
+  toPx,
+} from '../core/units/units';
+import type { MeasurementUnit } from '../core/units/units';
 import type { Document, PageSize } from '../model/types';
 
 const RESIZE_LABELS: Record<PageResizeBehaviour, string> = {
@@ -61,8 +76,20 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
 
   const widthInput = el('input', { type: 'number', min: '1', step: 'any', 'data-setup-width': '' });
   const heightInput = el('input', { type: 'number', min: '1', step: 'any', 'data-setup-height': '' });
+  /**
+   * The document's measurement unit, M24.
+   *
+   * Before M24 this control wrote `defaultSize.unit` -- the *page's* unit -- and taking the A4 preset
+   * silently selected millimetres while taking Letter selected inches. That is the leak the milestone
+   * names: a paper preset's own unit becoming the document's authoring unit. The preset label still
+   * carries the paper's own unit, because "A4 (210x297mm)" is what tells a reader the sheet size; the
+   * conversion into the chosen unit happens when the preset is applied.
+   *
+   * `pc` is offered because it is the unit a typographer setting a line length actually reaches for,
+   * and Scribus and InDesign both offer it. `px` is not: a document is a physical object.
+   */
   const unitSelect = el('select', { 'data-setup-unit': '' });
-  for (const unit of ['mm', 'cm', 'in', 'pt'] as const) {
+  for (const unit of MEASUREMENT_UNITS) {
     unitSelect.append(el('option', { value: unit }, unit));
   }
   const landscapeInput = el('input', { type: 'checkbox', 'data-setup-landscape': '' });
@@ -102,7 +129,7 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
     labelled('Name', nameInput),
     labelled('Page size', presetSelect),
     el('div', { class: 'p1-setup__grid' }, labelled('Width', widthInput), labelled('Height', heightInput)),
-    el('div', { class: 'p1-setup__grid' }, labelled('Unit', unitSelect), row(landscapeInput, el('span', {}, 'Landscape'))),
+    el('div', { class: 'p1-setup__grid' }, labelled('Measure in', unitSelect), row(landscapeInput, el('span', {}, 'Landscape'))),
     row(fixedSizeInput, el('span', {}, 'Fixed page size')),
     el(
       'p',
@@ -117,15 +144,72 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
 
   document.body.append(dialog);
 
+  /**
+   * The unit the width and height boxes are currently expressed in.
+   *
+   * A variable rather than read from the select, and that is the whole fix for a bug the first cut
+   * had: the `change` event fires *after* the control's value has changed, so reading it there
+   * gives the new unit for both sides of the conversion and the conversion silently does nothing.
+   * Tracking what the boxes hold is the only version of this that can tell "210 in mm" from "210 in
+   * inches" once the user has moved on.
+   */
+  let inputsAreIn: MeasurementUnit = DEFAULT_MEASUREMENT_UNIT;
+
+  /** The unit the dropdown is set to, falling back to the default rather than trusting the DOM. */
+  const currentUnit = (): MeasurementUnit =>
+    isMeasurementUnit(unitSelect.value) ? unitSelect.value : DEFAULT_MEASUREMENT_UNIT;
+
+  /** Writes both boxes, recording the unit they are in. The only writer of `inputsAreIn`. */
+  const writeInputs = (width: number, height: number, unit: MeasurementUnit): void => {
+    const precision = PRECISION_BY_UNIT[unit];
+    widthInput.value = String(Number(width.toFixed(precision)));
+    heightInput.value = String(Number(height.toFixed(precision)));
+    inputsAreIn = unit;
+  };
+
+  /**
+   * Writes a preset's dimensions into the boxes **in the document's unit**.
+   *
+   * The conversion is the point. `A4` is 210x297mm and `Letter` is 8.5x11in, and both are the same
+   * physical sheet once converted; showing them in the unit the user chose is what makes the unit
+   * control a *display* choice rather than a second thing that decides the paper. The old code wrote
+   * the preset's own numbers and then set the unit dropdown to match, which is how selecting Letter
+   * silently turned a millimetre document into an inch one.
+   */
   const applyPresetToInputs = (presetId: string): void => {
     const preset = PAGE_SIZE_PRESETS.find((candidate) => candidate.id === presetId);
     if (preset === undefined) return;
-    widthInput.value = String(preset.size.width);
-    heightInput.value = String(preset.size.height);
-    unitSelect.value = preset.size.unit;
+    const unit = currentUnit();
+    writeInputs(
+      fromPx(toPx(preset.size.width, preset.size.unit), unit),
+      fromPx(toPx(preset.size.height, preset.size.unit), unit),
+      unit,
+    );
+  };
+
+  /**
+   * Re-writes the width and height into the newly chosen unit, *keeping the same paper*.
+   *
+   * This is the difference between "change the unit" and "rescale the page", and getting it wrong is
+   * the single most destructive thing this dialog could do: reading the numbers as belonging to the
+   * old unit would turn an A4 page into a 210in x 297in one.
+   */
+  const convertInputsToUnit = (to: MeasurementUnit): void => {
+    const from = inputsAreIn;
+    if (from === to) {
+      inputsAreIn = to;
+      return;
+    }
+    const width = Number(widthInput.value);
+    const height = Number(heightInput.value);
+    // A box the user has typed something unparseable into is left alone, including the unit. The
+    // error only surfaces on Create, so silently discarding what they typed here would lose it.
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+    writeInputs(fromPx(toPx(width, from), to), fromPx(toPx(height, from), to), to);
   };
 
   presetSelect.addEventListener('change', () => applyPresetToInputs(presetSelect.value));
+  unitSelect.addEventListener('change', () => convertInputsToUnit(currentUnit()));
 
   cancelButton.addEventListener('click', () => dialog.close('cancel'));
 
@@ -133,16 +217,25 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
     open(current: Document) {
       // Pre-filled from the open document rather than the factory defaults; see the module comment.
       const setup = createPageSetup(current.pageSetup);
+      const unit = setup.unit;
       presetSelect.value =
         PAGE_SIZE_PRESETS.find(
           (preset) =>
-            preset.size.width === setup.defaultSize.width &&
-            preset.size.height === setup.defaultSize.height &&
-            preset.size.unit === setup.defaultSize.unit,
+            // Compared physically, not field by field: A4 is 210x297mm *and* 8.2677x11.6929in, and
+            // the second is what the boxes hold when the document is in inches. Matching on numbers
+            // would report "Custom" for every correctly-configured preset.
+            pageSizesEqual(preset.size, { ...setup.defaultSize, unit }) &&
+            preset.size.orientation === setup.defaultSize.orientation,
         )?.id ?? '__custom';
-      widthInput.value = String(setup.defaultSize.width);
-      heightInput.value = String(setup.defaultSize.height);
-      unitSelect.value = setup.defaultSize.unit;
+      // Through `writeInputs`, so the unit the boxes are in is recorded -- otherwise the *first* unit
+      // change after opening would convert from whatever the previous dialog left behind, and a
+      // cancelled-then-reopened dialog would rescale a page on the next change.
+      writeInputs(
+        fromPx(toPx(setup.defaultSize.width, setup.defaultSize.unit), unit),
+        fromPx(toPx(setup.defaultSize.height, setup.defaultSize.unit), unit),
+        unit,
+      );
+      unitSelect.value = unit;
       landscapeInput.checked = setup.defaultSize.orientation === 'landscape';
       fixedSizeInput.checked = setup.fixedSize;
       resizeSelect.value = setup.resizeBehaviour;
@@ -184,14 +277,22 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
           error.textContent = 'Width and height must both be positive numbers.';
           return null;
         }
-        if (!isPhysicalUnit(unitSelect.value)) {
-          error.textContent = 'Pick a physical unit.';
+        if (!isMeasurementUnit(unitSelect.value)) {
+          error.textContent = 'Pick a measurement unit.';
           return null;
         }
+        const unit = unitSelect.value;
         const defaultSize: PageSize = {
           width,
           height,
-          unit: unitSelect.value as PhysicalUnit,
+          // The page is stored in the *document's* unit too, so a new document has one unit
+          // throughout and the page panel's per-page override is something the user does
+          // deliberately rather than something they inherited by picking a preset.
+          //
+          // Storing px here instead would be *wrong*, not merely redundant: `printSheetSize` reads
+          // this unit to emit `@page { size: … }`, and a page whose unit said px while its numbers
+          // were millimetres would ask the print engine for a sheet of a different size.
+          unit,
           orientation: landscapeInput.checked ? 'landscape' : 'portrait',
         };
         return createDocument({
@@ -200,6 +301,8 @@ export function mountDocumentSetupDialog(): DocumentSetupDialog {
             fixedSize: fixedSizeInput.checked,
             defaultSize: clonePageSize(defaultSize),
             resizeBehaviour: resizeSelect.value as PageResizeBehaviour,
+            // M24. The unit the user picked, stored as the document's own.
+            unit,
           }),
         });
       }

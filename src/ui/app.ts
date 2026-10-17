@@ -37,7 +37,7 @@ import { validateDocument } from '../model/invariants';
 import { pageSizesEqual } from '../model/page-setup';
 import { placementsInDocument } from '../model/tree';
 import { formatLength } from '../core/units/units';
-import type { PhysicalUnit, Unit } from '../core/units/units';
+import type { MeasurementUnit } from '../core/units/units';
 import { DocumentView } from '../render/document-view';
 import { Viewport } from '../editor/viewport/viewport';
 import { Overlay } from '../editor/viewport/overlay';
@@ -278,13 +278,18 @@ function uniformSizes(pages: readonly Page[]): boolean {
 }
 
 /**
- * The unit for coordinate readouts: the focused page's own, falling back to the document default.
+ * The unit every measurement field, ruler and coordinate readout in this document uses. M24.
  *
- * Read live rather than cached because the focused page changes as the user moves through the stack,
- * and in a mixed-unit document those values genuinely differ.
+ * **Read live, and deliberately not from the page.** The previous version took the *focused page's*
+ * `size.unit`, which meant the display unit changed as the user scrolled through a mixed-unit
+ * document and was persisted nowhere. `pageSetup.unit` is the document's own field, so the answer is
+ * the same for every page and survives a save.
+ *
+ * The two are genuinely different questions: `printSheetSize` still reads `page.size.unit`, because
+ * the size of the paper in the PDF is a property of the paper.
  */
-function documentUnit(): PhysicalUnit {
-  return (firstPage(doc().pages) ?? { size: doc().pageSetup.defaultSize }).size.unit;
+function documentUnit(): MeasurementUnit {
+  return doc().pageSetup.unit;
 }
   const rulers = new Rulers(
     {
@@ -293,7 +298,7 @@ function documentUnit(): PhysicalUnit {
       corner: queryRequired<HTMLElement>('[data-ruler-corner]'),
     },
     viewport,
-    { unit: documentUnit() as Unit },
+    { unit: documentUnit },
   );
 
   const inspector = mountInspector(
@@ -800,7 +805,7 @@ function documentUnit(): PhysicalUnit {
   // are separate spaces: it shows the page-local document position, while the
   // viewport internally works in client and stack coordinates.
   viewportRoot.addEventListener('pointermove', (event) => {
-    const unit = documentUnit() as Unit;
+    const unit = documentUnit();
     const client = { x: event.clientX, y: event.clientY };
 
     // Classify first, then read coordinates. `pagePointFromClient` returns null for

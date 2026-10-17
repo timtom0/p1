@@ -16,8 +16,16 @@ import type { Unit } from '../../core/units/units';
 import type { Viewport } from '../../editor/viewport/viewport';
 
 export interface RulerOptions {
-  /** Document unit used for tick labels. */
-  unit: Unit;
+  /**
+   * The document's measurement unit, read **live**.
+   *
+   * A supplier rather than a value because M24 made the unit a document field the user can change:
+   * a snapshot taken at construction left the ruler labelled in millimetres after the unit became
+   * points, and the only way to notice was to look at the ruler. Previously this was read once and
+   * never re-read, while the function producing it was a live getter -- so the staleness was invisible
+   * in the source.
+   */
+  unit: () => Unit;
 }
 
 const TICK_STEPS = [
@@ -46,7 +54,7 @@ export class Rulers {
   private readonly horizontal: HTMLCanvasElement;
   private readonly vertical: HTMLCanvasElement;
   private readonly corner: HTMLElement;
-  private readonly unit: Unit;
+  private readonly unit: () => Unit;
   private readonly viewport: Viewport;
 
   private resizeObserver: ResizeObserver | undefined;
@@ -87,7 +95,7 @@ export class Rulers {
 
     this.drawAxis(this.horizontal, 'horizontal', step, zoom);
     this.drawAxis(this.vertical, 'vertical', step, zoom);
-    this.corner.textContent = formatLength(0, this.unit);
+    this.corner.textContent = formatLength(0, this.unit());
   }
 
   dispose(): void {
@@ -170,7 +178,7 @@ private drawAxis(
 
       // Label the major ticks. Negative values are reachable by scrolling past
       // the origin, and are useful for seeing the page in context.
-      const label = formatLength(documentPx, this.unit, 1);
+      const label = formatLength(documentPx, this.unit(), 1);
       if (axis === 'horizontal') {
         context.textBaseline = 'top';
         context.fillText(label, Math.round(position) + 3, tickLength + 1);

@@ -81,6 +81,14 @@ export function serialize(doc: Document): PersistedDocument {
     pageSetup: {
       fixedSize: doc.pageSetup.fixedSize,
       resizeBehaviour: doc.pageSetup.resizeBehaviour,
+      // M24. Between the two scalars and `defaultSize`, matching the declaration order in
+      // `page-setup.ts` -- which is the rule this whole block already states, so the new key joins
+      // it rather than needing a second ordering argument.
+      //
+      // Written unconditionally, including the default. A v6 file therefore has exactly one shape,
+      // and "the unit is mm" is a value rather than an absence -- the same reason M23 wrote `styles`
+      // as `[]` rather than omitting it.
+      unit: doc.pageSetup.unit,
       // Key order is the persisted order, so `defaultSize` sits where the reader expects it and two
       // equal setups emit identically. It is written after the two scalars to match the interface's
       // own declaration order in `page-setup.ts`.

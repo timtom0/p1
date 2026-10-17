@@ -146,6 +146,7 @@ function persisted(overrides: Record<string, unknown> = {}): string {
     name: 'X',
     pageSetup: {
       fixedSize: true,
+      unit: 'mm',
       defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },

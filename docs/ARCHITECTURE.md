@@ -44,6 +44,7 @@ of record; deviations are recorded in the milestone notes at the end.
 | **M21** Typography foundation | **Done - the existing controls made reachable and real** - see [ADR 0003 amendments](adr/0003-production-text-model.md#amendments). `fontFamily` control added; the unset state of every `TextStyle` property made reachable; `Ctrl+B/I/U` bound outside a text session; `dir="auto"` per paragraph |
 | **M22** Advanced typography | **Done - authored direction, paragraph indents, super/subscript** - see [ADR 0003 amendments](adr/0003-production-text-model.md#m22--authored-direction-indents-and-super--subscript) and [M22 notes](#m22-implementation-notes--advanced-typography). Format **v4**. `ParagraphBlock.dir` and `.metrics`; five metrics mapped to CSS *logical* properties, so RTL correctness is a consequence of CSS rather than of a branch; `CharFormat.super`/`.sub`; the DOM walker reads all of it back |
 | **M23** Reusable styles | **Done - document-local styles with live references, and remove/unlink kept apart** - see [M23 notes](#m23-implementation-notes--reusable-document-local-styles) and [ADR 0003 amendments](adr/0003-production-text-model.md#m23--reusable-document-local-styles). |
+| **M24** Measurement units | **Done - a document-wide unit that is a reading and never a rescale** - see [ADR 0020](adr/0020-document-measurement-units.md) and [M24 notes](#m24-implementation-notes--document-measurement-units). Format **v6**. `PageSetup.unit`; a bare number in a field is read in it; `px` stays the internal geometry unit |
 | M20+ | Not started |
 
 Twenty-seven known limitations are recorded rather than hidden. Five of them are now closed and struck
@@ -4773,3 +4774,81 @@ Ctrl+Z rather than three. The shortcut claims the keystroke only once something 
 
 The dialogs are for the *panel*, where a user is looking at two paragraphs of explanation and has time
 to read them; a modal on every keystroke would make the routine case pay for the uncommon mistake.
+
+## M24 implementation notes - Document measurement units
+
+Format **v6**. `PageSetup.unit: MeasurementUnit` is required, persisted, and document-scoped. See
+[ADR 0020](adr/0020-document-measurement-units.md) for the decisions and their sources.
+
+### Three units that are not one unit
+
+| | Question it answers | Varies by | Why it must stay separate |
+|---|---|---|---|
+| `PageSetup.unit` | How numbers are read and shown | document | This is the preference. Persisted, so there is finally something to store. |
+| `Page.size.unit` | How big this sheet is | **page** | Load-bearing: `printSheetSize` turns it into `@page { size: 210mm 297mm }`. A document unit that leaked in here would change the paper. |
+| `PageSizePreset.unit` | How big the *named* paper is | preset | `Letter` is 8.5×11in. Choosing it must convert, not switch. |
+
+`px` is none of them. It stays the internal geometry unit (ADR 0004) and nothing about M24 touches
+geometry storage.
+
+### Reading a typed number
+
+`parseLength(input, defaultUnit)` takes a **required** default unit. That is the whole enforcement
+mechanism: three private "does this have a suffix?" copies defaulted to pixels, and making the argument
+required let the compiler find all three. They are deleted.
+
+A suffix wins, a bare number is the document's unit, and an empty field means unset. `readLength` names
+the refusals — `empty` / `not-a-number` / `unknown-unit` — and the last two are separated by a digit
+test, so `12em` is "I do not know that unit" rather than "that is not a number". The inspector now says
+which, in the field's own tooltip. This is a **deliberate deviation** from Scribus's
+`unitValueFromString`, which returns `0.0` and so silently reinterprets.
+
+### Precision, and the guard that has to go with it
+
+`PRECISION_BY_UNIT` is `mm` 2, `cm` 2, `in` 3, `pt` 2, `pc` 2, `px` 2. The rule is
+**round-trippability**, and it was found the hard way: `pt` was originally 1, derived from "show the
+finest increment worth a tenth of a pixel", and 40px is 30.75pt, so one decimal showed `30.8` and
+reading it back stored 41.07. A field whose reading cannot be written back is a field that cannot be
+edited.
+
+Which is why every commit path carries `unchanged(input)`. A field the user has not touched is **never
+committed**, even though its displayed value is rounded — otherwise opening a panel quantises every
+selected object to the display quantum, and repeating that is how a document quietly loses precision.
+
+### The dialog bug the suite caught
+
+`convertInputsToUnit` read the unit from the select *inside* the `change` handler, by which time the
+control already held the **new** value. Both sides of the conversion were the same unit, the guard
+returned early, and changing the unit silently did nothing — the absence of a symptom. The fix is
+`inputsAreIn`, a variable recording what the boxes currently hold, which is the only version that can
+still tell "210 in mm" from "210 in inches" once the user has moved on.
+
+### Two equivalent mutants, and what they said about the tests
+
+Both were removed after measurement, and the reasons are the interesting part:
+
+- Pinning the ruler's corner readout to `mm` was **not wrong** under the M24 fixture, which is a
+  millimetre document — only untestable. The fix is a better test: the ruler is asserted in both
+  directions, that scrolling to an inch page does *not* change it and that changing the document unit
+  *does*. A readout that ignored the document entirely passes the first half alone.
+- "Choosing the unit the document already has records a step" was compared by undo-button `title`. It
+  passed while the mutant lived, because a step writing the value it already held produces the same
+  title. The assertion is now one undo landing back on millimetres and the button then being disabled.
+
+### Migration
+
+v1–v5 → `mm`, because `DEFAULT_PAGE_PRESET` has been A4-in-millimetres since before the format
+existed. **Not** inferred from `defaultSize.unit`: that would make the authoring unit a function of
+which paper is selected, and would let the first page's unit leak into a mixed document.
+
+The branch is on the **version**, not on `undefined`. Reading a missing key as the default would make a
+required field optional in every version at once and quietly accept a hand-stripped v6 file.
+`pageSetupKeysFor(5)` refuses a `unit` by name, and three *loaded* browser fixtures declare
+`formatVersion: 5` with no unit so the migration runs on a real path rather than being asserted around.
+
+### What is not covered
+
+`clickAt` maps through page 0, because `clientPointAt` takes a page index that `clickAt` does not
+expose. An object on a later page cannot be selected from a spec, so the mixed-unit claim is made
+through two surfaces that both read page 1 plus the ruler across a scroll. Widening `clickAt` is
+follow-up; the limit is recorded in the test rather than worked around.

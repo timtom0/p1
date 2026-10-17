@@ -38,7 +38,7 @@ const B = 400;
  */
 const TWO_STYLED = `() => ({
   formatVersion: 5, id: 'm23', name: 'Styles',
-  pageSetup: { fixedSize: true, defaultSize: { width: 800, height: 400, unit: 'px', orientation: 'landscape' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'px', defaultSize: { width: 800, height: 400, unit: 'px', orientation: 'landscape' }, resizeBehaviour: 'crop' },
   styles: [
     {
       id: 'sty_quote',

@@ -120,7 +120,7 @@ test.describe('the counts are named for what they count', () => {
       page,
       `() => ({
         formatVersion: 3, id: 'diag', name: 'Diag',
-        pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         styles: [],
         assets: {},
         pages: [{
@@ -269,7 +269,7 @@ test.describe('the readiness condition cannot be satisfied by static HTML', () =
       page,
       `() => ({
         formatVersion: 3, id: 'broken', name: 'Broken',
-        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         styles: [],
         assets: {},
         pages: [
@@ -303,7 +303,7 @@ test.describe('the readiness condition cannot be satisfied by static HTML', () =
         console.error('an advisory message that must not fail the boot');
         return {
           formatVersion: 3, id: 'noisy', name: 'Noisy',
-          pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
           styles: [],
           assets: {},
           pages: [{ id: 'p1', name: '1', size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [] }],

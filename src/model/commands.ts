@@ -691,6 +691,11 @@ case 'unlinkStyle': {
       if (
         next.fixedSize === doc.pageSetup.fixedSize &&
         next.resizeBehaviour === doc.pageSetup.resizeBehaviour &&
+        // M24. Missing this when unit was added would make a no-op unit change record an undo
+        // step, which is the exact failure M22 already fixed for the paragraph metrics and
+        // metricState: a panel that records history for nothing is how an undo list fills with
+        // entries a user has to press through.
+        next.unit === doc.pageSetup.unit &&
         pageSizesEqual(next.defaultSize, doc.pageSetup.defaultSize)
       ) {
         return doc;

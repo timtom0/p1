@@ -75,6 +75,7 @@ function validDocument(): Record<string, unknown> {
     name: 'Valid',
     pageSetup: {
       fixedSize: true,
+      unit: 'mm',
       defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
       resizeBehaviour: 'crop',
     },

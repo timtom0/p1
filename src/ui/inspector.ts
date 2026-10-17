@@ -38,8 +38,8 @@ import type { PropertySpec } from '../model/shapes';
 import { defaultStroke } from '../model/creation';
 import { findNode } from '../editor/selection';
 import type { CharFlag } from '../model/rich-text';
-import { formatLength, parseLength as parseLengthPx } from '../core/units/units';
-import type { PhysicalUnit } from '../core/units/units';
+import { formatLength, parseLength, readLength, type ParseProblem } from '../core/units/units';
+import type { MeasurementUnit, PhysicalUnit } from '../core/units/units';
 import { createStylesPanel } from './styles-panel';
 import { registerStyleActions, styleUi } from './style-ui';
 
@@ -94,11 +94,31 @@ interface TextFieldSpec {
    * never claims a listed font is present.
    */
   kind: 'length' | 'ratio' | 'colour' | 'family';
+  /**
+   * The unit this field is shown and typed in, when it is not the document's. M24.
+   *
+   * `undefined` means "the document unit", which is right for every measurement. It is **not** right
+   * for font size, and that is the one deliberate exception in the whole contract.
+   *
+   * ## Why font size is points whatever the document is in
+   *
+   * A font size is not a length the author measures off a ruler; it is the size the font was
+   * designed at, and every typeface in existence is specified in points. A document set in
+   * millimetres still wants its body text in 11pt, and a document set in inches still wants its
+   * caption in 9pt -- offering "12mm" as a font size would be a unit nobody asks for. The same is
+   * true of leading, which is expressed as a multiple of the size rather than as a length at all.
+   *
+   * It is also what the established applications do: the Type panel is in points regardless of what
+   * the ruler and the position fields are set to. See the research notes in ADR 0022 -- this is one
+   * of the two places where a claim rests on the convention rather than on a source I could read
+   * directly, and it is flagged there.
+   */
+  unit?: 'pt';
 }
 
 const TEXT_FIELDS: readonly TextFieldSpec[] = [
   { key: 'fontFamily', label: 'Font', kind: 'family' },
-  { key: 'fontSize', label: 'Size', kind: 'length' },
+  { key: 'fontSize', label: 'Size', kind: 'length', unit: 'pt' },
   { key: 'lineHeight', label: 'Line', kind: 'ratio' },
   { key: 'letterSpacing', label: 'Track', kind: 'ratio' },
   { key: 'color', label: 'Colour', kind: 'colour' },
@@ -343,18 +363,64 @@ export function mountInspector(
     inputs.set(field.key, input);
   }
 
+/**
+ * Whether a field's text is unchanged from what the panel last showed. M24.
+ *
+ * The reason is in `commit`, where it is acted on; this exists so the four commit paths share one
+ * rule instead of four copies of a comparison that is easy to write slightly differently.
+ */
+function unchanged(input: HTMLInputElement): boolean {
+  return input.value.trim() === (input.dataset['shown'] ?? '');
+}
+/**
+ * What a field says when it refuses a value. M24.
+ *
+ * The alternative -- highlighting the box and saying nothing -- is what this panel did, and it is
+ * why the unit milestone had to add `readLength` and then find a caller for it: a field that shows
+ * the old number after refusing the new one, with no explanation, reads as a bug in the app rather
+ * than as the app declining to guess.
+ *
+ * "Not a number" and "unknown unit" are kept apart because they are different mistakes and the
+ * remedy is different. Someone who typed `12em` almost certainly meant millimetres and misspelled
+ * it; telling them it is not a number sends them looking for a typo that is not there.
+ */
+function problemMessage(problem: ParseProblem): string {
+  switch (problem) {
+    case 'unknown-unit':
+      return 'Rotulus does not know that unit. Use mm, cm, in, pt or pc, or type a bare number for this document\'s unit.';
+    case 'empty':
+      return 'Empty means "no value set" here. Leave it alone to keep the default.';
+    default:
+      return 'That is not a number.';
+  }
+}
   function commit(field: FieldSpec, input: HTMLInputElement): void {
     const ids = [...editor.selectionState.ids];
     if (ids.length === 0) return;
 
     const raw = input.value.trim();
-    const parsed = field.unit === 'deg' ? parseDegrees(raw) : parseLength(raw, unit());
+
+    // M24: an unedited field must not be committed at all. Display rounds, so the box holds a
+    // *rounded* reading of the stored px; committing it back would replace the exact value with the
+    // rounded one, and a user who tabbed through a panel without touching anything would have
+    // silently quantised every measurement on the way. Repeated edit-and-leave cycles would then
+    // accumulate, which is the "cumulative precision loss" the milestone names.
+    //
+    // The test is against what the field *showed*, not against the model, because that is the only
+    // thing the user could have been comparing against: selecting an object and immediately
+    // selecting another is not an edit.
+    if (unchanged(input)) return;
+
+    const read = field.unit === 'deg' ? null : readLength(raw, unit());
+    const parsed = field.unit === 'deg' ? parseDegrees(raw) : (read?.px ?? null);
     if (parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title = read?.problem === undefined ? 'That is not a number.' : problemMessage(read.problem);
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
+    input.title = '';
 
     // One transaction per commit: a single undo step, regardless of how the value
     // got there.
@@ -463,6 +529,7 @@ export function mountInspector(
   function commitAppearance(field: AppearanceFieldSpec, input: HTMLInputElement): void {
     const ids = shapeIds();
     if (ids.length === 0) return;
+    if (unchanged(input)) return;
 
     const raw = input.value.trim();
     const parsed =
@@ -475,6 +542,8 @@ export function mountInspector(
     if (parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title =
+      input.title = field.kind === 'length' ? problemMessage(readLength(raw, unit()).problem ?? 'not-a-number') : 'That is not a value this property accepts.';
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
@@ -1116,6 +1185,17 @@ export function mountInspector(
     );
   }
 
+/**
+ * The unit a text field is shown and typed in. M24.
+ *
+ * A function rather than an inline `field.unit ?? unit()` at each of the four sites, because the
+ * read and the write have to agree: a field formatted in points and parsed in the document unit
+ * would shift by the display quantum every time it was opened and closed, which is the kind of
+ * drift nobody notices until a size is wrong by half a point.
+ */
+function textFieldUnit(field: TextFieldSpec): MeasurementUnit | 'pt' {
+  return field.unit ?? unit();
+}
   function commitText(field: TextFieldSpec, input: HTMLInputElement): void {
     const ids = textFrameIds();
     if (ids.length === 0) return;
@@ -1137,7 +1217,7 @@ export function mountInspector(
       raw === ''
         ? undefined
         : field.kind === 'length'
-          ? parseLength(raw, unit())
+          ? parseLength(raw, textFieldUnit(field))
           : field.kind === 'ratio'
             ? parseRatio(raw)
             : field.kind === 'family'
@@ -1147,6 +1227,8 @@ export function mountInspector(
     if (raw !== '' && parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title =
+      input.title = field.kind === 'length' ? problemMessage(readLength(raw, textFieldUnit(field)).problem ?? 'not-a-number') : 'That is not a value this property accepts.';
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
@@ -1175,6 +1257,9 @@ export function mountInspector(
    * and `textIndent` is the one key that is signed there too.
    */
   function commitMetric(key: keyof ParagraphMetrics, input: HTMLInputElement): void {
+    // M24, for the reason commit gives. The metric fields are the ones this bites hardest:
+    // a millimetre indent at two decimals is a rounding a user cannot see.
+    if (unchanged(input)) return;
     const ids = textFrameIds();
     if (ids.length === 0) return;
 
@@ -1184,6 +1269,7 @@ export function mountInspector(
     if (raw !== '' && parsed === null) {
       input.value = input.dataset['shown'] ?? '';
       input.classList.add('p1-inspector-field-input--invalid');
+      input.title = problemMessage(readLength(raw, unit()).problem ?? 'not-a-number');
       return;
     }
     input.classList.remove('p1-inspector-field-input--invalid');
@@ -1238,7 +1324,7 @@ export function mountInspector(
       input.placeholder = '';
       const shown =
         field.kind === 'length'
-          ? formatLength(value as number, unit())
+          ? formatLength(value as number, textFieldUnit(field))
           : field.kind === 'ratio'
             ? formatRatio(value as number)
             : String(value);
@@ -1762,19 +1848,6 @@ function parseDegrees(raw: string): number | null {
   return Number.isFinite(value) ? (value * Math.PI) / 180 : null;
 }
 
-/**
- * Parses a length into **document px**, defaulting a bare number to `defaultUnit`.
- *
- * The default matters more than it looks. The field *displays* the page's authored
- * unit, so a user who selects "30pt" and types "75" means 75pt. Letting `parseLength`
- * fall back to px would set 75px instead — a silent 25% error on a value the user can
- * see they typed correctly. The field has to read in the unit it writes in.
- */
-function parseLength(raw: string, defaultUnit: PhysicalUnit): number | null {
-  const hasUnit = /[a-z]+\s*$/i.test(raw.trim());
-  const withDefault = hasUnit ? raw : `${raw}${defaultUnit}`;
-  return parseLengthPx(withDefault);
-}
 
 function formatDegrees(radians: number): string {
   const degrees = (radians * 180) / Math.PI;

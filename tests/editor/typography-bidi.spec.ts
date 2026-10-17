@@ -61,7 +61,7 @@ function fixtureFor(text: string): string {
   // written here -- a test fixture that re-encodes its own subject is a test of the encoder.
   return `() => ({
     formatVersion: 3, id: 'bidi', name: 'Bidi',
-    pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{
@@ -178,7 +178,7 @@ test.describe('bidi and shaping survive the model', () => {
       page,
       `() => ({
         formatVersion: 3, id: 'mix', name: 'Mixed',
-        pageSetup: { fixedSize: true, defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         styles: [],
         assets: {},
         pages: [{
