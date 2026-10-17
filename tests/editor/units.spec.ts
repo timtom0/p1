@@ -138,13 +138,19 @@ test.describe('the document unit reaches every surface', () => {
     expect(await page.locator('[data-pages-panel] [data-page-unit]').inputValue()).toBe('mm');
   });
 
-  test('the ruler names the document unit', async ({ page }) => {
+  test('the ruler names the document unit, and follows a change to it', async ({ page }) => {
     expect(await rulerUnit(page)).toBe('0mm');
     // Scrolling to the inch page must not change it. Before M24 it came from the focused page, so
     // this is where the old behaviour would have flipped to inches.
     await page.locator('[data-page="p_in"]').scrollIntoViewIfNeeded();
     await settle(page);
     expect(await rulerUnit(page)).toBe('0mm');
+
+    // ...and a change to the document unit does reach it, which is the other half. Both directions
+    // are needed: a readout that ignored the document entirely would satisfy the first half alone.
+    await page.locator('[data-pages-panel] [data-document-unit]').selectOption('pt');
+    await settle(page);
+    expect(await rulerUnit(page)).toBe('0pt');
   });
 
   test('font size stays in points whatever the document is in', async ({ page }) => {
@@ -273,12 +279,20 @@ test.describe('changing the document unit', () => {
   test('a no-op selection records nothing', async ({ page }) => {
     await page.locator('[data-pages-panel] [data-document-unit]').selectOption('pt');
     await settle(page);
-    const before = await page.locator('[data-edit="undo"]').getAttribute('title');
-    // Choosing the unit the document already has must not put a dead step in the undo history --
-    // the reducer's guard compares `unit` for exactly this.
+    expect(await page.locator('[data-pages-panel] [data-document-unit]').inputValue()).toBe('pt');
+
+    // Choosing the unit the document already has must not put a dead step in the undo history.
+    // The assertion is *one* undo landing back on millimetres, not a comparison of button titles:
+    // a step that writes the value it already held would undo to no visible change, so "the title
+    // is the same" would have passed while the history quietly grew.
     await page.locator('[data-pages-panel] [data-document-unit]').selectOption('pt');
     await settle(page);
-    expect(await page.locator('[data-edit="undo"]').getAttribute('title')).toBe(before);
+    await page.locator('[data-edit="undo"]').click();
+    await settle(page);
+    expect(await page.locator('[data-pages-panel] [data-document-unit]').inputValue()).toBe('mm');
+
+    // ...and there is nothing further back: the undo button has nothing left to undo.
+    expect(await page.locator('[data-edit="undo"]').isDisabled()).toBe(true);
   });
 
   test('persists, and a reopened document reads it back', async ({ page }) => {

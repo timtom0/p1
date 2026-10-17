@@ -1304,3 +1304,105 @@ Add-Mutation "the toast's undo re-runs the action instead of undoing it" `
   'src\ui\toast.ts' `
   { param($t) $t.Replace('options.action?.run();', 'dismiss();') } `
   'tests/editor/styles.spec.ts'
+
+# --- M24: document-wide measurement units -----------------------------------
+#
+# The rule this block exists to enforce is narrow enough to state in one line and wide enough that
+# breaking it is easy: **the document's measurement unit is a reading, and changing it must change
+# nothing else.** Almost every mutant below is some form of "the unit leaked into a stored number",
+# which is the one defect a milestone about units can actually ship.
+#
+# The layering the block follows is the layering the milestone had to enforce, and it is worth
+# reading the order top to bottom as a description of the dependency:
+#
+#  * `units.ts` -- the *contract*. What a bare number means, which refusals are distinguishable, and
+#    how many decimals a unit shows. Each of the three terms is a separate mutant, because a parser
+#    that gets one of them wrong still parses.
+#  * the model and the format -- *where the answer lives*. `PageSetup.unit` exists, is required, and
+#    is keyed by version. A field that is persisted but optional, or optional but persisted, is
+#    silently a different contract.
+#  * the readers -- *who answers with it*. The inspector, the ruler and the dialog all consult the
+#    document. Each of them is a separate mutant because each was, at some point during M24, reading
+#    something else.
+#
+# Two mutants here are aimed at the **browser** suite rather than the unit tests, and that is the
+# point of them: both render correctly under happy-dom and are wrong on screen. `documentUnit()`
+# reading `defaultSize.unit` is the single most consequential substitution in the file -- it restores
+# the entire pre-M24 behaviour, the focused page deciding the units, while every model test in the
+# repository continues to pass.
+# ---------------------------------------------------------------------------
+
+Add-Mutation 'a bare number is read in points rather than the caller''s unit' `
+  'src\core\units\units.ts' `
+  { param($t) $t.Replace('const unit = (match[2] ?? defaultUnit) as Unit;', 'const unit = (match[2] ?? ''pt'') as Unit;') } `
+  'src/core/units/units.test.ts'
+
+Add-Mutation 'readLength cannot tell an unknown unit from a value that is not a number' `
+  'src\core\units\units.ts' `
+  { param($t) $t.Replace("hasDigits && suffix !== '' && !isUnit(suffix) ? 'unknown-unit' : 'not-a-number'", "'not-a-number'") } `
+  'src/core/units/units.test.ts'
+
+Add-Mutation 'points lose the second decimal, so a displayed value can no longer be written back' `
+  'src\core\units\units.ts' `
+  { param($t) $t.Replace('  pt: 2,', '  pt: 1,') } `
+  'tests/editor/measure.spec.ts'
+
+Add-Mutation 'a new document is in points rather than in the default unit' `
+  'src\model\page-setup.ts' `
+  { param($t) $t.Replace('unit: DEFAULT_MEASUREMENT_UNIT,', "unit: 'pt',") } `
+  'tests/persist/version6-units.test.ts'
+
+Add-Mutation 'a pre-v6 page setup accepts the unit that v6 introduced' `
+  'src\persist\format.ts' `
+  { param($t) $t.Replace('return version >= 6 ? PAGE_SETUP_KEYS : PRE_UNIT_PAGE_SETUP_KEYS;', 'return PAGE_SETUP_KEYS;') } `
+  'tests/persist/version6-units.test.ts'
+
+Add-Mutation 'the saved document omits the unit, so it reads back as the default whatever it was' `
+  'src\persist\serialize.ts' `
+  { param($t) $t.Replace('unit: doc.pageSetup.unit,', 'unit: undefined,') } `
+  'tests/persist/version6-units.test.ts'
+
+Add-Mutation 'the saved unit is read but never used, so every document opens in the default unit' `
+  'src\persist\deserialize.ts' `
+  { param($t) $t.Replace("expectEnum(record['unit'], 'pageSetup.unit', MEASUREMENT_UNITS)", 'DEFAULT_MEASUREMENT_UNIT') } `
+  'tests/persist/version6-units.test.ts'
+
+Add-Mutation 'an older document migrates to points rather than to the default unit' `
+  'src\persist\deserialize.ts' `
+  { param($t) $t.Replace(': DEFAULT_MEASUREMENT_UNIT,', ": 'pt',") } `
+  'tests/persist/version6-units.test.ts'
+
+Add-Mutation 'choosing the unit the document already has still records a history step' `
+  'src\model\commands.ts' `
+  { param($t) $t.Replace('next.unit === doc.pageSetup.unit &&', 'false &&') } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'the focused page decides the units again, exactly as it did before M24' `
+  'src\ui\app.ts' `
+  { param($t) $t.Replace('return doc().pageSetup.unit;', 'return doc().pageSetup.defaultSize.unit;') } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'font size follows the document unit instead of being always points' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace('return field.unit ?? unit();', 'return unit();') } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'an unedited field is committed, so a rounded reading is written over the real value' `
+  'src\ui\inspector.ts' `
+  { param($t) $t.Replace('if (unchanged(input)) return;', 'if (false) return;') } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'the ruler takes a snapshot of the unit, so it does not follow a change' `
+  'src\ui\chrome\ruler.ts' `
+  { param($t) $t.Replace('this.corner.textContent = formatLength(0, this.unit());', "this.corner.textContent = formatLength(0, 'mm');") } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'changing the unit in the New Document dialog rescales the page instead of converting it' `
+  'src\ui\document-setup.ts' `
+  { param($t) $t.Replace('const from = inputsAreIn;', 'const from = to;') } `
+  'tests/editor/units.spec.ts'
+
+Add-Mutation 'a page-size preset is written in its own unit rather than converted into the document''s' `
+  'src\ui\document-setup.ts' `
+  { param($t) $t.Replace('fromPx(toPx(preset.size.width, preset.size.unit), unit),', 'preset.size.width,') } `
+  'tests/editor/units.spec.ts'
