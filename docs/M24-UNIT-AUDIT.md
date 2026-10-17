@@ -2,7 +2,11 @@
 
 Findings from reading the implementation before changing anything, and the eight questions the
 milestone asks to be resolved. The external-convention research is summarised in
-`docs/adr/0022-document-measurement-units.md`; this file is the *state of the code*.
+`docs/adr/0020-document-measurement-units.md`; this file is the *state of the code*.
+
+> **This is a pre-change audit.** "What exists today" describes the code as of `8183732`, before M24.
+> For the decisions and their sources, read ADR 0020 and the M24 notes in `ARCHITECTURE.md`; for what
+> shipped, read the code.
 
 ## What exists today
 
