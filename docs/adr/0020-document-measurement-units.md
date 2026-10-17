@@ -177,7 +177,8 @@ variables, but it fixed the ground they will stand on, and getting this wrong la
   and any code that multiplies by a ratio without going through it is a bug — the dialog bug this
   milestone shipped and its suite caught is exactly that mistake, made in the opposite direction.
 
-**Open:** `clickAt` maps through page 0 only, because `clientPointAt` takes a page index that `clickAt`
-does not expose. An object on a later page cannot be selected from a spec. Widening `clickAt` is
-follow-up work; the M24 browser suite records the limit in the test rather than working around it
-silently.
+**Open:** none outstanding. The follow-up pass closed both gaps M24 recorded. `clickAt` now takes a
+page index, and the helper that computes the click *verifies* the point is inside the page it was
+asked for rather than trusting the mapping — a click that lands on the wrong page produces no error,
+only a selection on the wrong object. And the fixture guard classifies injected from loaded
+literals instead of keeping a list of exemptions. See the M24 notes in `ARCHITECTURE.md`.

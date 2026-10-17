@@ -265,6 +265,59 @@ test.describe('the document unit reaches every surface', () => {
   });
 });
 
+/**
+ * Everything about how the document is *drawn* and *shaped*, in one round trip.
+ *
+ * Deliberately not the inspector's readings. Every unit invariant below is a claim about the
+ * document being untouched, and the inspector is the one surface that is *supposed* to change when
+ * the unit changes -- so a test that read the fields would be measuring the thing it is meant to
+ * prove independent of.
+ *
+ * Object positions are **relative to their own page**, not to the viewport. Viewport coordinates
+ * move when the canvas scrolls, which is exactly what reloading a document does, and a sweep that
+ * reported a 38px shift across a reload would be reporting the scroll rather than the geometry.
+ */
+async function geometry(page: Page): Promise<{
+  pages: Array<{ id: string; width: number; height: number }>;
+  objects: Array<{ id: string; page: string; left: number; top: number; width: number; height: number }>;
+}> {
+  return page.evaluate(() => {
+    const pageOf = new Map<Element, HTMLElement>();
+    const pages = Array.from(document.querySelectorAll<HTMLElement>('[data-page]'));
+    for (const el of pages) {
+      for (const child of el.querySelectorAll('[data-oid]')) pageOf.set(child, el);
+    }
+    return {
+      pages: pages.map((el) => {
+        const box = el.getBoundingClientRect();
+        return { id: el.dataset['page'] ?? '?', width: box.width, height: box.height };
+      }),
+      objects: Array.from(document.querySelectorAll<HTMLElement>('[data-oid]')).map((el) => {
+        const box = el.getBoundingClientRect();
+        const origin = pageOf.get(el)?.getBoundingClientRect();
+        return {
+          id: el.dataset['oid'] ?? '?',
+          page: pageOf.get(el)?.dataset['page'] ?? '?',
+          left: box.left - (origin?.left ?? 0),
+          top: box.top - (origin?.top ?? 0),
+          width: box.width,
+          height: box.height,
+        };
+      }),
+    };
+  });
+}
+
+/** Opens a document through the app's own file input, as a user would. */
+async function open(page: Page, document: unknown, name = 'round-trip.p1doc'): Promise<void> {
+  await page.locator('[data-file-input="document"]').setInputFiles({
+    name,
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(document), 'utf8'),
+  });
+  await settle(page);
+}
+
 test.describe('changing the document unit', () => {
   test.beforeEach(async ({ page }) => {
     await mountFixture(page, MIXED);
@@ -334,6 +387,229 @@ test.describe('changing the document unit', () => {
     const doc = await saved(page);
     expect((doc['pageSetup'] as { unit: string }).unit).toBe('cm');
   });
+
+  // ---------------------------------------------------------------------
+  // Invariants. The tests above establish that the unit *reaches* the UI.
+  // These establish that nothing else moves when it does -- which is the
+  // claim the whole contract rests on and the one no reading can prove,
+  // because the readings are supposed to change.
+  // ---------------------------------------------------------------------
+
+  test('moves no pixel of the document, in any unit', async ({ page }) => {
+    // Every unit in turn, against one full sweep of rendered geometry.
+    //
+    // The fixture is deliberately mixed (A4/mm, 5x7in, 400x500pt), so a sweep that only looked at
+    // page 0 would pass while a conversion leaked into one of the other two.
+    const before = await geometry(page);
+    // Three: two on the millimetre page and one on the inch page. The count is asserted because a
+    // sweep over fewer objects than the fixture has is a sweep that would pass a partial conversion.
+    expect(before.objects.map((o) => o.id).sort(), 'the sweep found the fixture objects').toEqual([
+      'in_copy',
+      'mm_box',
+      'mm_copy',
+    ]);
+
+    for (const unit of ['mm', 'cm', 'in', 'pt', 'pc'] as const) {
+      await page.locator('[data-pages-panel] [data-document-unit]').selectOption(unit);
+      await settle(page);
+      expect(await geometry(page), `switching to ${unit} moved something`).toEqual(before);
+    }
+
+    // ...and back to millimetres, because the loop above never returns to the starting state and a
+    // one-way change could pass a comparison that only ever moves forward.
+    await page.locator('[data-pages-panel] [data-document-unit]').selectOption('mm');
+    await settle(page);
+    expect(await geometry(page)).toEqual(before);
+  });
+
+  test('leaves every page size untouched, not just every page unit', async ({ page }) => {
+    // The companion to `leaves every page on its own unit`, and it is the one that would catch a
+    // unit change *rescaling* the sheet. `unit` and `size` are separate fields; a conversion that
+    // reached the wrong one would leave the unit correct and the paper wrong.
+    await page.locator('[data-pages-panel] [data-document-unit]').selectOption('pc');
+    await settle(page);
+    const doc = await saved(page);
+    expect((doc['pages'] as Array<{ size: Record<string, number | string> }>).map((p) => p.size)).toEqual([
+      { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      { width: 5, height: 7, unit: 'in', orientation: 'portrait' },
+      { width: 400, height: 500, unit: 'pt', orientation: 'portrait' },
+    ]);
+  });
+});
+
+test.describe('a mixed-unit document survives a real round trip', () => {
+  test('editing, saving and loading again leaves it mixed, and identical', async ({ page }) => {
+    await mountFixture(page, MIXED);
+    const before = await geometry(page);
+
+    // Edit something on page 1 in the document's unit, using a **suffixed** value so the edit is
+    // also exercising the override rule inside the round trip rather than beside it.
+    await clickAt(page, 100, 80);
+    await settle(page);
+    const width = page.locator('[data-inspector] [data-field="width"]');
+    await width.fill('2in');
+    await width.press('Enter');
+    await settle(page);
+    // 2in is 192px; the field reports it in millimetres, which is 50.8.
+    expect(await width.inputValue()).toBe('50.8mm');
+
+    const savedDoc = await saved(page);
+    await open(page, savedDoc);
+
+    // The unit came back...
+    expect((savedDoc['pageSetup'] as { unit: string }).unit).toBe('mm');
+    // ...the page units came back, still disagreeing...
+    expect(
+      (savedDoc['pages'] as Array<{ size: { unit: string } }>).map((p) => p.size.unit),
+    ).toEqual(['mm', 'in', 'pt']);
+    // ...the edit is there, in px...
+    const box = (savedDoc['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    expect((box?.['transform'] as { width: number }).width).toBe(192);
+    // ...and the drawing is the same drawing, one edit later. Compared by **id**, not by index:
+    // DOM order across a reload is a property of the renderer, not of the document, and asserting
+    // on it would fail for a reason that has nothing to do with units.
+    const after = await geometry(page);
+    expect(after.pages).toEqual(before.pages);
+    const was = new Map(before.objects.map((o) => [o.id, o]));
+    const now = new Map(after.objects.map((o) => [o.id, o]));
+    expect([...now.keys()].sort(), 'the same objects, by id').toEqual([...was.keys()].sort());
+    // The edited one moved; the one on the inch page did not.
+    expect(now.get('mm_box')?.width).not.toBeCloseTo(was.get('mm_box')?.width ?? 0, 1);
+    expect(now.get('mm_copy')).toEqual(was.get('mm_copy'));
+    expect(now.get('in_copy')).toEqual(was.get('in_copy'));
+  });
+
+  test('reopening the mixed document three times is stable', async ({ page }) => {
+    // The failure this catches is a migration that is not idempotent -- each load rewriting a
+    // slightly different value, so the third save differs from the second for no reason. One pass
+    // would look fine; only a repeat shows the drift.
+    await mountFixture(page, MIXED);
+    let previous = JSON.stringify(await saved(page));
+    for (let round = 0; round < 3; round += 1) {
+      await open(page, JSON.parse(previous));
+      const again = JSON.stringify(await saved(page));
+      expect(again, `round ${round + 1} changed the document`).toBe(previous);
+      previous = again;
+    }
+  });
+});
+
+test.describe('the inspector never writes back what it only displayed', () => {
+  test.beforeEach(async ({ page }) => {
+    await mountFixture(page, MIXED);
+  });
+
+  test('selecting away and back does not quantise the value', async ({ page }) => {
+    await clickAt(page, 100, 80);
+    await settle(page);
+    const before = await inspector(page, 'x');
+
+    // Away to another object and back. This is the route that is *not* a blur -- the panel is torn
+    // down for one object and rebuilt for the other -- so it is the one most likely to commit on
+    // rebuild.
+    await clickAt(page, 60, 240);
+    await settle(page);
+    expect(await inspector(page, 'x'), 'the other object really was selected').toBe('10.58mm');
+    await clickAt(page, 100, 80);
+    await settle(page);
+
+    expect(await inspector(page, 'x')).toBe(before);
+    const doc = await saved(page);
+    const node = (doc['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    // 40px is 10.58333...mm, so committing the displayed `10.58mm` would store 39.987px. The
+    // assertion is tight enough to see a single quantisation, which is the failure itself.
+    expect((node?.['transform'] as { x: number }).x).toBe(40);
+  });
+
+  test('switching the document unit does not quantise anything either', async ({ page }) => {
+    await clickAt(page, 100, 80);
+    await settle(page);
+    // A unit change refreshes every field, which is the widest possible "the panel was redrawn".
+    for (const unit of ['in', 'cm', 'pc', 'pt', 'mm'] as const) {
+      await page.locator('[data-pages-panel] [data-document-unit]').selectOption(unit);
+      await settle(page);
+    }
+    const doc = await saved(page);
+    const box = (doc['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    expect((box?.['transform'] as { x: number; width: number }).x).toBe(40);
+    expect((box?.['transform'] as { width: number }).width).toBe(120);
+  });
+
+  test('a field the user did touch is committed exactly once', async ({ page }) => {
+    await clickAt(page, 100, 80);
+    await settle(page);
+    const width = page.locator('[data-inspector] [data-field="width"]');
+    await width.fill('40');
+    await width.press('Enter');
+    await settle(page);
+
+    const first = await saved(page);
+    const node = (first['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    // 40mm, exactly. Not 39.99, which is what re-committing the displayed value would give.
+    expect((node?.['transform'] as { width: number }).width).toBeCloseTo(151.181, 3);
+
+    // Blur afterwards must not commit the rounded reading over it.
+    await page.locator('[data-inspector] [data-field="height"]').click();
+    await settle(page);
+    const second = await saved(page);
+    const again = (second['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]
+      ?.objects[0];
+    expect((again?.['transform'] as { width: number }).width).toBe(
+      (node?.['transform'] as { width: number }).width,
+    );
+  });
+});
+
+test.describe('a suffix always wins', () => {
+  test.beforeEach(async ({ page }) => {
+    await mountFixture(page, MIXED);
+  });
+
+  // Each of the five accepted units, entered into a **millimetre** document, with the value chosen
+  // so its px equivalent is exact where that is possible and the assertion is written accordingly.
+  const CASES: ReadonlyArray<{ typed: string; px: number; shown: string }> = [
+    { typed: '1in', px: 96, shown: '25.4mm' },
+    { typed: '72pt', px: 96, shown: '25.4mm' },
+    { typed: '6pc', px: 96, shown: '25.4mm' },
+    { typed: '2.54cm', px: 96, shown: '25.4mm' },
+    { typed: '96px', px: 96, shown: '25.4mm' },
+  ];
+
+  for (const { typed, px, shown } of CASES) {
+    test(`${typed} is read as itself, not as millimetres`, async ({ page }) => {
+      await clickAt(page, 100, 80);
+      await settle(page);
+      const x = page.locator('[data-inspector] [data-field="x"]');
+      await x.fill(typed);
+      await x.press('Enter');
+      await settle(page);
+
+      expect(await x.inputValue(), 'the field reports the document unit, not the typed one').toBe(
+        shown,
+      );
+      const doc = await saved(page);
+      const node = (doc['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]
+        ?.objects[0];
+      expect((node?.['transform'] as { x: number }).x, `${typed} was not read in its own unit`).toBe(
+        px,
+      );
+    });
+  }
+
+  test('a bare number in the same field would have meant something else', async ({ page }) => {
+    // The control for the loop above: 96 is 96mm, which is 361.4px -- not the 96px that `96px` means.
+    // Without this the loop could pass with a parser that ignored the suffix entirely and the
+    // fixture's numbers happened to line up.
+    await clickAt(page, 100, 80);
+    await settle(page);
+    const x = page.locator('[data-inspector] [data-field="x"]');
+    await x.fill('96');
+    await x.press('Enter');
+    await settle(page);
+    const doc = await saved(page);
+    const node = (doc['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    expect((node?.['transform'] as { x: number }).x).toBeCloseTo(362.835, 2);
+  });
 });
 
 test.describe('the New Document dialog', () => {
@@ -401,6 +677,104 @@ test.describe('the New Document dialog', () => {
     // 210mm is 8.2677in. Treating the number as belonging to the old unit would give an 8 inch
     // page, which is the destructive reading this conversion exists to prevent.
     expect(await dialog.locator('[data-setup-width]').inputValue()).toBe('8.268');
+  });
+});
+
+test.describe('a legacy document keeps its appearance', () => {
+  // The app has to exist before a file can be opened into it; `open` replaces whatever is mounted.
+  test.beforeEach(async ({ page }) => {
+    await mountFixture(page, MIXED);
+  });
+
+  /**
+   * A **format 5** document: no `pageSetup.unit`, because M24 put the field in v6.
+   *
+   * Mixed units on purpose, for the reason the milestone exists -- a migration that inferred the
+   * document unit from the first page would look correct on this document if it happened to start
+   * in millimetres, and would be wrong on any document that does not.
+   *
+   * The shapes are at px values that are not round in any unit (40, 137, 213), so a migration that
+   * rescaled by a ratio rather than leaving the numbers alone would move them visibly.
+   */
+  const LEGACY = {
+    format: 'p1doc',
+    formatVersion: 5,
+    id: 'legacy',
+    name: 'Legacy',
+    pageSetup: {
+      fixedSize: true,
+      defaultSize: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+      resizeBehaviour: 'crop',
+    },
+    styles: [],
+    assets: {},
+    pages: [
+      {
+        id: 'l_mm',
+        name: '1',
+        size: { width: 210, height: 297, unit: 'mm', orientation: 'portrait' },
+        background: { type: 'solid', color: '#ffffff' },
+        objects: [
+          {
+            type: 'shape',
+            id: 'legacy_box',
+            name: 'box',
+            transform: { x: 37, y: 41, width: 137, height: 213, rotation: 0, scaleX: 1, scaleY: 1 },
+            visible: true,
+            locked: false,
+            opacity: 1,
+            blendMode: 'normal',
+            shape: { kind: 'rect', cornerRadius: 8 },
+            fill: { type: 'solid', color: '#3366ff' },
+          },
+        ],
+      },
+      {
+        id: 'l_in',
+        name: '2',
+        size: { width: 5, height: 7, unit: 'in', orientation: 'portrait' },
+        background: { type: 'solid', color: '#ffffff' },
+        objects: [],
+      },
+    ],
+  };
+
+  test('opens, migrates on save, and looks the same before and after', async ({ page }) => {
+    await open(page, LEGACY, 'legacy.p1doc');
+    const asOpened = await geometry(page);
+
+    // Migrated on save: the bytes that come back are v6, with a unit the file never had.
+    const migrated = await saved(page);
+    expect(migrated['formatVersion']).toBe(6);
+    expect((migrated['pageSetup'] as { unit: string }).unit).toBe('mm');
+    // And not one stored number moved to get there.
+    const box = (migrated['pages'] as Array<{ objects: Array<Record<string, unknown>> }>)[0]?.objects[0];
+    expect((box?.['transform'] as Record<string, number>)).toMatchObject({ x: 37, y: 41, width: 137, height: 213 });
+
+    await open(page, migrated, 'migrated.p1doc');
+    expect(await geometry(page), 'the migrated document draws differently').toEqual(asOpened);
+  });
+
+  test('looks the same as the same document authored directly in v6', async ({ page }) => {
+    // The control for the test above. "It round-tripped" can be true of a migration that rescaled
+    // *consistently*, so the comparison has to be against a document that was never migrated --
+    // otherwise a wrong unit would be invisible, because both readings would be wrong the same way.
+    await open(page, LEGACY, 'legacy.p1doc');
+    const legacy = await geometry(page);
+
+    await open(page, { ...LEGACY, formatVersion: 6, pageSetup: { ...LEGACY.pageSetup, unit: 'mm' } }, 'current.p1doc');
+    expect(await geometry(page), 'a v5 document and its v6 equivalent must draw identically').toEqual(
+      legacy,
+    );
+  });
+
+  test('a v5 document declaring a unit is refused, so it cannot be quietly accepted', async ({ page }) => {
+    // The other side of the migration's contract. If a v5 file carrying `unit` were accepted, the
+    // migration would have two sources for the same answer and no way to say which won.
+    await open(page, { ...LEGACY, pageSetup: { ...LEGACY.pageSetup, unit: 'cm' } }, 'bad.p1doc');
+    await settle(page);
+    const refused = await page.locator('[data-doc-message]').getAttribute('data-error');
+    expect(refused, 'a v5 document with a v6 field must be refused').toBe('true');
   });
 });
 

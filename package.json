@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "test:visual": "playwright test",
+    "test:browser": "playwright test --reporter=line",
+    "sweep": "node ./scripts/sweep.cjs",
     "test:visual:update": "playwright test --update-snapshots",
     "test:all": "npm run test && npm run test:visual",
     "test": "vitest run",

@@ -371,9 +371,34 @@ function Add-Mutation([string] $label, [string] $path, [scriptblock] $apply, [st
 }
 
 function Stop-DevServer {
+  # **The whole tree, not the one PID.**
+  #
+  # `Start-Process ... -PassThru` returns the PID of the process it launched, and for
+  # `npx vite preview` that is the npx/npm *wrapper*. The wrapper spawns `vite.js` as a child and then
+  # waits, so `Stop-Process -Id $wrapper -Force` kills the wrapper and leaves the actual server
+  # running: still bound to its port, still holding a Node runtime, invisible to every later cleanup
+  # because nothing holds its PID any more.
+  #
+  # Measured cost: three such orphans were alive after a full run, on the per-worker ports
+  # 4319/4174/5199, listening on nothing and using ~90 MB between them. Across a session of runs that
+  # accumulates, and it is memory and CPU the *user's* browser is competing for -- which is the one
+  # symptom a test harness must never cause.
+  #
+  # `taskkill /T` takes the descendants with it. `-ErrorAction SilentlyContinue` because a server that
+  # died on its own is a success, not a failure to report.
   foreach ($server in $script:servers) {
     if ($null -ne $server) {
-      Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+      taskkill /PID $server.Id /T /F 2>&1 | Out-Null
+      # And reap the tree by name as a backstop, for a wrapper that exited before we got here and so
+      # left children with no reachable ancestor. Scoped to vite under this repo's node_modules, so it
+      # cannot reach a server anyone else started.
+      Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.CommandLine -like '*vite*' -and
+          $_.CommandLine -like '*p1\node_modules*' -and
+          $_.ParentProcessId -eq $server.Id
+        } |
+        ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }
     }
   }
   $script:servers = @()

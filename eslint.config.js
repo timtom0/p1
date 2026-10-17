@@ -68,6 +68,27 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }],
     },
   },
+  // CommonJS helper scripts under `scripts/`.
+  //
+  // They are Node programs, not browser modules, and they are not type-checked by `tsc` -- the
+  // project has no `allowJs`, so nothing else verifies them. Two consequences, both deliberate:
+  //
+  //  * `sourceType: 'commonjs'`, because they `require`.
+  //  * `no-undef` **off**. Without the type checker this rule is all cost and no signal: it flags
+  //    `process`, `Buffer` and `__dirname` -- three names that are unambiguously present at runtime --
+  //    and would still miss a genuine typo'd local only if something else caught it. Turning it on
+  //    honestly meant enumerating Node's globals, which is a list that goes stale.
+  //
+  // `npm run lint` still covers `src tests` only. This block exists so `eslint scripts` is a usable
+  // extra check rather than 49 errors nobody looks at.
+  {
+    files: ['scripts/**/*.cjs', 'scripts/**/*.mjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: {
+      'no-undef': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   // Per-layer import direction.
   ...Object.entries(ALLOWED_IMPORTS).map(([layer]) => ({
     files: [`src/${layer}/**/*.ts`],

@@ -4848,7 +4848,21 @@ required field optional in every version at once and quietly accept a hand-strip
 
 ### What is not covered
 
-`clickAt` maps through page 0, because `clientPointAt` takes a page index that `clickAt` does not
-expose. An object on a later page cannot be selected from a spec, so the mixed-unit claim is made
-through two surfaces that both read page 1 plus the ruler across a scroll. Widening `clickAt` is
-follow-up; the limit is recorded in the test rather than worked around.
+Nothing, as of the follow-up pass. The three gaps M24 reported have been closed:
+
+- **`clickAt` took no page index.** It does now, as a fifth parameter after `modifiers` so the 269
+  existing call sites are untouched. The parameter is the small part: `clickablePointAt` also
+  **checks** that the point it computed is inside the page it was asked for and inside the scroll
+  container, because a click that lands somewhere else produces no error -- it produces a selection
+  on the wrong object. `clientPointAt` is deliberately left unscrolling: several specs map points
+  just past a page edge to assert that hit-testing *refuses* them.
+- **The fixture guard kept a list of exempt literals.** It now classifies. A literal inside a
+  `` `() => `` template is *injected* and must satisfy the model contract itself; anything else is
+  *loaded*, goes through the deserialiser, and is checked there. Neither `format: 'p1doc'` nor
+  `formatVersion` separates them -- `group-fixtures.ts` carries the envelope on a fixture the store
+  never parses, and 66 injected fixtures declare `formatVersion: 3` while meaning the current model.
+  The loaded class gets its own rule instead: *a loaded document claiming a version that requires
+  `unit` must declare it*. Both rules were probed by breaking them rather than trusted.
+- **One unit invariant had only a model-level test.** A format 5 document is now opened, migrated on
+  save and compared against the same document authored directly in v6, so "the migration preserved
+  appearance" is a statement about rendered geometry rather than about deserialiser output.
