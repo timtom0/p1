@@ -133,12 +133,129 @@ export async function clickAt(
   docX: number,
   docY: number,
   modifiers: ('Shift' | 'Alt' | 'Control')[] = [],
+  pageIndex = 0,
 ): Promise<void> {
-  const point = await clientPointAt(page, docX, docY);
+  const point = await clickablePointAt(page, docX, docY, pageIndex);
   for (const modifier of modifiers) await page.keyboard.down(modifier);
   await page.mouse.click(point.x, point.y);
   for (const modifier of [...modifiers].reverse()) await page.keyboard.up(modifier);
   await settle(page);
+}
+
+/**
+ * {@link clientPointAt}, with the page brought into view first -- and the mapping **checked**.
+ *
+ * ## Why this exists separately from `clientPointAt`
+ *
+ * `clientPointAt` is a pure mapping and its callers are entitled to ask about points that are off
+ * screen: several specs deliberately map coordinates just past the page edge to assert that
+ * hit-testing refuses them. Scrolling inside a mapping function would silently move those answers,
+ * so the scroll lives here, in the function whose whole job is to click something.
+ *
+ * ## Why the check, when the scroll should have been enough
+ *
+ * Because "should have been enough" is how M24's own browser suite ended up unable to select an
+ * object on a later page and asserting the unit question through two other surfaces instead. A
+ * helper that computes a client point from the wrong page's rect and clicks it produces **no
+ * error**: the click lands, on whatever is actually there, and the assertion that follows fails
+ * about something else entirely. So this verifies that the point really is inside the page it was
+ * asked for, and inside the viewport, and throws naming both if not.
+ *
+ * A test that forgets the `pageIndex` still clicks page 0 -- the status quo -- but a test that
+ * passes a `pageIndex` whose page cannot be scrolled to gets a failure that says so, rather than a
+ * selection on the wrong page.
+ *
+ * The scroll is explicit-instant because the app may style `scroll-behavior: smooth`, and an
+ * `evaluate` has no way to wait for an animation it did not start.
+ */
+export async function clickablePointAt(
+  page: Page,
+  docX: number,
+  docY: number,
+  pageIndex = 0,
+): Promise<{ x: number; y: number }> {
+  const result = await page.evaluate(
+    ({ x, y, index }) => {
+      const elements = document.querySelectorAll('[data-page]');
+      const pageElement = elements[index];
+      if (!(pageElement instanceof HTMLElement)) {
+        return { error: `no page at index ${index}; the document has ${elements.length}` };
+      }
+      const stack = document.querySelector('[data-pages]');
+      if (!(stack instanceof HTMLElement)) return { error: 'no page stack' };
+
+      // The box that decides whether a click can happen. This is `[data-viewport]`, **not** the
+      // window: the canvas scrolls inside it, so measuring against `documentElement` would report
+      // a point that looks on screen while it is under a panel, and the corrective scroll below --
+      // which is on the window -- would be a no-op.
+      const viewport =
+        document.querySelector('[data-viewport]') ?? document.documentElement;
+      const viewportBox = viewport.getBoundingClientRect();
+
+      const scale = new DOMMatrixReadOnly(getComputedStyle(stack).transform).a;
+      const measure = () => {
+        const box = pageElement.getBoundingClientRect();
+        return { x: box.x + x * scale, y: box.y + y * scale, box };
+      };
+
+      // `instant` so this cannot become an animation an `evaluate` walks away from. This scrolls
+      // every scrollable ancestor, which is the one the canvas actually lives in.
+      pageElement.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      let at = measure();
+
+      // A page taller than the viewport can still be scrolled to with the point out of sight; move
+      // the *scroll container*, then re-measure, because the rect moved with the scroll.
+      const hidden = (p: { x: number; y: number }) =>
+        p.x < viewportBox.x ||
+        p.y < viewportBox.y ||
+        p.x >= viewportBox.x + viewportBox.width ||
+        p.y >= viewportBox.y + viewportBox.height;
+      if (hidden(at)) {
+        const wantX = at.x - (viewportBox.x + viewportBox.width / 2);
+        const wantY = at.y - (viewportBox.y + viewportBox.height / 2);
+        if (viewport === document.documentElement) {
+          window.scrollBy(wantX, wantY);
+        } else {
+          viewport.scrollLeft += wantX;
+          viewport.scrollTop += wantY;
+        }
+        at = measure();
+      }
+
+      const { x: boxX, y: boxY, width, height } = at.box;
+      return {
+        x: at.x,
+        y: at.y,
+        insidePage: at.x >= boxX && at.x <= boxX + width && at.y >= boxY && at.y <= boxY + height,
+        outsideViewport: hidden(at),
+        viewport: `${Math.round(viewportBox.width)}x${Math.round(viewportBox.height)}`,
+        pageRect: `${Math.round(boxX)},${Math.round(boxY)} ${Math.round(width)}x${Math.round(height)}`,
+      };
+    },
+    { x: docX, y: docY, index: pageIndex },
+  );
+
+  if ('error' in result && result.error !== undefined) throw new Error(result.error);
+  if ('insidePage' in result && result.insidePage === false) {
+    throw new Error(
+      `document point (${docX}, ${docY}) on page ${pageIndex} maps to ${Math.round(result.x)},` +
+        `${Math.round(result.y)} which is outside that page's rect (${result.pageRect}). The page ` +
+        `elements and the coordinate mapping disagree -- a stack-scale or padding change, most ` +
+        `likely, rather than a bad coordinate.`,
+    );
+  }
+  if ('outsideViewport' in result && result.outsideViewport) {
+    throw new Error(
+      `document point (${docX}, ${docY}) on page ${pageIndex} maps to ${Math.round(result.x)},` +
+        `${Math.round(result.y)}, outside the ${result.viewport} viewport even after scrolling. The ` +
+        `point is too far into the page for this window size; shrink the fixture or enlarge the ` +
+        `viewport rather than clicking somewhere else.`,
+    );
+  }
+  if (!Number.isFinite(result.x) || !Number.isFinite(result.y)) {
+    throw new Error(`clickablePointAt produced a non-finite point: ${JSON.stringify(result)}`);
+  }
+  return { x: result.x, y: result.y };
 }
 
 /** Presses, moves through intermediate points, and releases — a real drag. */

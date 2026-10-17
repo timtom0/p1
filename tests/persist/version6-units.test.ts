@@ -37,7 +37,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { CURRENT_FORMAT_VERSION } from '../../src/persist/format';
+import {
+  CURRENT_FORMAT_VERSION,
+  PRE_UNIT_PAGE_SETUP_KEYS,
+  pageSetupKeysFor,
+} from '../../src/persist/format';
 import { parse } from '../../src/persist/deserialize';
 import { serializeToString } from '../../src/persist/serialize';
 import { toPx, fromPx } from '../../src/core/units/units';
@@ -73,6 +77,26 @@ function contentSnapshot(doc: Document): unknown {
 describe('format v6', () => {
   it('is the current version', () => {
     expect(CURRENT_FORMAT_VERSION).toBe(6);
+  });
+
+  it('is the version that introduced the unit, and that linkage is what the fixtures key off', () => {
+    // `pageSetupKeysFor` hardcodes the boundary as a literal, and the fixture guard asks it which
+    // versions require `unit` rather than repeating the number. That is only safe while the two
+    // agree, so this is the test that keeps them agreeing: a version bump that moves
+    // `CURRENT_FORMAT_VERSION` without moving the key list fails here, loudly, instead of quietly
+    // making the fixture guard's threshold wrong.
+    expect(pageSetupKeysFor(CURRENT_FORMAT_VERSION), 'the current version carries the unit').toContain(
+      'unit',
+    );
+    expect(
+      pageSetupKeysFor(CURRENT_FORMAT_VERSION - 1),
+      'and the one before it does not, which is the whole of the migration',
+    ).not.toContain('unit');
+    // The pre-unit list must be a strict prefix of the current one, so `unit` is the only difference
+    // and bumping the version cannot quietly add a second required key without this noticing.
+    expect([...pageSetupKeysFor(CURRENT_FORMAT_VERSION - 1)].sort()).toEqual(
+      [...PRE_UNIT_PAGE_SETUP_KEYS].sort(),
+    );
   });
 
   it('reads a v6 document and keeps the unit it was saved with', () => {

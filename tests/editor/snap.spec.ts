@@ -585,7 +585,13 @@ test.describe('snap state never reaches the document', () => {
           formatVersion: 3,
           id: 'x',
           name: 'X',
-          pageSetup: { fixedSize: true, unit: 'px', defaultSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+          // No `unit` on the page setup, and that is load-bearing rather than tidiness: this is a
+          // **format 3** document, and M24 put `pageSetup.unit` in v6, so a v3 page setup carrying
+          // one is refused by name. With it present this test passed for two reasons and the
+          // assertion below could not tell which -- the document was refused for the `guides` key
+          // *and* for a key its version does not have. The fixture now refuses for the reason it
+          // names, and only that reason.
+          pageSetup: { fixedSize: true, defaultSize: { width: 300, height: 200, unit: 'px', orientation: 'portrait' }, resizeBehaviour: 'crop' },
           styles: [],
           assets: {},
           guides: [],

@@ -117,6 +117,39 @@ test.describe('the document unit reaches every surface', () => {
     await mountFixture(page, MIXED);
   });
 
+  test('the inspector uses the document unit on an inch page', async ({ page }) => {
+    // Page 2 is sized in **inches**; the document is in millimetres. Before M24 the focused page
+    // decided, so this field would have read `0.42in` and the ruler would have flipped to inches as
+    // the user scrolled -- the behaviour the milestone exists to end.
+    //
+    // This selects the object directly, which is only possible because `clickAt` takes a page index.
+    // Before that, this suite asserted the same question through the ruler and the pages panel
+    // instead, which proved the two units were separate but never that the *fields* followed the
+    // document while showing a page they disagreed with.
+    await clickAt(page, 130, 80, [], 1);
+    await settle(page);
+
+    // 30px is 7.94mm. The stored x is 30 either way; only the unit differs.
+    expect(await inspector(page, 'x')).toBe('7.94mm');
+    expect(await rulerUnit(page)).toBe('0mm');
+
+    // The pages panel reads the **focused** page, and clicking a shape does not move the focus --
+    // `focusPage` is called from the panel alone. So focus page 2 explicitly before reading it,
+    // which also puts the assertion on the combination the milestone is about: a focused inch page
+    // inside a millimetre document.
+    await page.locator('[data-page-row]:nth-child(2) [data-page-select]').click();
+    await settle(page);
+    expect(await page.locator('[data-pages-panel] [data-page-unit]').inputValue()).toBe('in');
+    expect(await page.locator('[data-pages-panel] [data-document-unit]').inputValue()).toBe('mm');
+
+    // ...and switching the document to points is the same length said differently, on a page still
+    // sized in inches.
+    await page.locator('[data-pages-panel] [data-document-unit]').selectOption('pt');
+    await settle(page);
+    expect(await inspector(page, 'x')).toBe('22.5pt');
+    expect(await page.locator('[data-pages-panel] [data-page-unit]').inputValue()).toBe('in');
+  });
+
   test('the inspector uses the document unit while the panel shows each page its own', async ({ page }) => {
     // `clickAt` maps through page 0 -- `clientPointAt` takes a page index and `clickAt` does not
     // expose one -- so a selection on page 2 is not reachable from here. The claim is made through

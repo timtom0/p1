@@ -32,6 +32,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CURRENT_FORMAT_VERSION, pageSetupKeysFor } from '../src/persist/format';
 
 const TESTS_ROOT = join(process.cwd(), 'tests');
 
@@ -83,6 +84,49 @@ interface DocumentLiteral {
   after: number;
   /** The first line of the literal. */
   text: string;
+  /**
+   * How the app receives this literal, which decides whose contract it has to satisfy.
+   *
+   * See {@link deliveryOf} for why this is a property of the literal and not of a hand-kept list.
+   */
+  delivery: 'injected' | 'loaded';
+  /** The `formatVersion` the literal declares, when it declares one. */
+  version: number | null;
+}
+
+/**
+ * Whether a literal is **injected** (handed to the store verbatim) or **loaded** (serialised into a
+ * file and pushed through the deserialiser).
+ *
+ * ## Why this is not an exemption list
+ *
+ * The obvious way to write "these four literals are exempt" is four lines naming them, and that is
+ * what M24 did for three of them. It is wrong in the way a list is always wrong: a list is a claim
+ * about the past that nothing checks, so it goes stale silently and then either blocks a legitimate
+ * fixture or -- worse -- keeps exempting one that has since become subject to the rule.
+ *
+ * ## The property that actually decides it
+ *
+ * `window.__P1_FIXTURE__` is an unchecked `() => Document` cast, so an **injected** fixture has to
+ * carry the model contract itself. A **loaded** document is `JSON.stringify`'d and opened, so the
+ * deserialiser checks it -- that is what `expectEnum`, `pageSetupKeysFor` and the required-field
+ * refusals exist for, and `version6-units.test.ts` is where those are tested.
+ *
+ * So the two classes need *different* checks, and the way to tell them apart is the delivery, not
+ * the content. It is visible in the syntax: an injected fixture is a **template string** whose body
+ * is a function, and a loaded document is an **object expression** that gets stringified. Neither
+ * `format: 'p1doc'` nor `formatVersion` distinguishes them -- `group-fixtures.ts` carries the
+ * envelope on a fixture the store never parses, and 66 injected fixtures declare `formatVersion: 3`
+ * while meaning the current model -- so the discriminator has to be the container.
+ *
+ * The nearest preceding `` `() => `` opens the fixture; if no backtick closes it before this literal,
+ * the literal is inside it.
+ */
+function deliveryOf(source: string, offset: number): 'injected' | 'loaded' {
+  const before = source.slice(0, offset);
+  const open = before.lastIndexOf('`() =>');
+  const closed = open === -1 ? -1 : before.indexOf('`', open + 1);
+  return open !== -1 && closed === -1 ? 'injected' : 'loaded';
 }
 
 /**
@@ -103,6 +147,10 @@ function findDocumentLiterals(): DocumentLiteral[] {
     const pattern = /^[ \t]*pageSetup:[ \t]*\{/gm;
     for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
       const line = source.slice(0, match.index).split('\n').length;
+      // The version is read from a short window *backwards* from the literal. Forward would find
+      // the next literal's, which is the version bug this file's header is about.
+      const window = source.slice(Math.max(0, match.index - 400), match.index);
+      const version = /formatVersion[ \t]*:[ \t]*(\d+)/.exec(window);
       found.push({
         file,
         line,
@@ -110,6 +158,8 @@ function findDocumentLiterals(): DocumentLiteral[] {
         // one -- the match begins at the indentation, before the key it is searching for.
         after: match.index + match[0].length,
         text: source.slice(match.index).split('\n')[0]?.trim() ?? '',
+        delivery: deliveryOf(source, match.index),
+        version: version === null ? null : Number(version[1]),
       });
     }
   }
@@ -138,45 +188,6 @@ function findUnsizedPages(file: string): string[] {
     }
   }
   return found;
-}
-
-/**
- * Literals that carry no `pageSetup.unit` **on purpose**, and why.
- *
- * The same discipline as {@link DELIBERATELY_UNSIZED}: each entry must still have the literal it
- * exists for, or the suite fails and the entry has to go. A stale exemption is a hole with a
- * comment on it.
- *
- * All three are the same case and it is the exception the guard's own premise does not cover. Every
- * other document literal in these files is an **injected** fixture, handed to the store verbatim,
- * which is why it needs the field spelled out. These three are **loaded** through the file input, so
- * they go through the deserialiser -- and they declare `formatVersion: 5`, for which the migration
- * supplies the default. Writing a `unit` into one would be refused by name, which is the correct
- * answer and not the one these tests are about.
- *
- * So they are not un-guarded; they are guarded by a different rule, the one in
- * `version6-units.test.ts`.
- */
-const DELIBERATELY_UNUNITED: Readonly<Record<string, string>> = {
-  'editor/persistence.spec.ts:501': 'loaded through the file input at format 5; the migration supplies the unit',
-  'editor/persistence.spec.ts:583': 'the refusal base, loaded at format 5; the migration supplies the unit',
-  'editor/print.spec.ts:295': 'opened through the file input at format 5, which also covers the migration',
-};
-
-/** The `path:line` keys of every literal with no `pageSetup.unit`, exemptions aside. */
-function missingUnits(literals: readonly DocumentLiteral[]): string[] {
-  const absent: string[] = [];
-  for (const literal of literals) {
-    const source = readFileSync(literal.file, 'utf8');
-    const next = source.indexOf('pageSetup:', literal.after);
-    const end = next === -1 ? source.length : next;
-    const statement = source.slice(literal.after, end);
-    const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
-    if (!/unit[ \t]*:/.test(beforeDefault)) {
-      absent.push(`${testRelativePath(literal.file)}:${literal.line}`);
-    }
-  }
-  return absent;
 }
 
 /**
@@ -216,12 +227,38 @@ function fieldsMissingFrom(literals: readonly DocumentLiteral[], field: string):
   return missing;
 }
 
+/**
+ * `path:line` for each literal with no `pageSetup.unit` before its `defaultSize`.
+ *
+ * Position-matched rather than substring-matched because `defaultSize.unit` is the **page's** unit
+ * and every fixture has one; only a `unit` ahead of `defaultSize` is the page setup's own.
+ *
+ * The window is `literal.after` to the next `pageSetup` -- forward from this literal, never
+ * backward -- for the reason {@link fieldsMissingFrom} gives.
+ */
+function missingUnits(literals: readonly DocumentLiteral[]): string[] {
+  const absent: string[] = [];
+  for (const literal of literals) {
+    const source = readFileSync(literal.file, 'utf8');
+    const next = source.indexOf('pageSetup:', literal.after);
+    const end = next === -1 ? source.length : next;
+    const statement = source.slice(literal.after, end);
+    const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
+    if (!/unit[ \t]*:/.test(beforeDefault)) {
+      absent.push(`${testRelativePath(literal.file)}:${literal.line}`);
+    }
+  }
+  return absent;
+}
+
 const MISSING_FIELD_MESSAGE = (field: string, addition: string): string =>
   `these document literals omit \`${field}\`, so the app receives a document that is not a ` +
   `\`Document\`. Add \`${addition}\` after the \`pageSetup\` line.`;
 
 describe('injected document fixtures', () => {
   const literals = findDocumentLiterals();
+  const injected = literals.filter((literal) => literal.delivery === 'injected');
+  const loaded = literals.filter((literal) => literal.delivery === 'loaded');
 
   it('finds the fixtures at all', () => {
     // If this ever finds nothing the guard below is vacuous, so it would pass forever. A
@@ -229,11 +266,26 @@ describe('injected document fixtures', () => {
     expect(literals.length).toBeGreaterThan(20);
   });
 
-  it('every document literal declares `assets`', () => {
-    expect(fieldsMissingFrom(literals, 'assets'), MISSING_FIELD_MESSAGE('assets', 'assets: {}')).toEqual([]);
+  it('separates the injected fixtures from the loaded documents', () => {
+    // The classifier is the whole basis of scoping the rules below, so it gets its own check for
+    // the failure that would be invisible: **one class silently becoming empty**. If every literal
+    // were read as injected, the loaded-document rule below would have nothing to say and no test
+    // would notice.
+    expect(injected.length).toBeGreaterThan(20);
+    expect(loaded.length).toBeGreaterThan(0);
+    // And the small class should stay small. A pile of new "loaded" documents is not a reason to
+    // relax this; it is a reason to wonder whether they are really loaded.
+    expect(loaded.length).toBeLessThan(12);
   });
 
-  it('every document literal declares `styles`', () => {
+  it('every injected document literal declares `assets`', () => {
+    expect(
+      fieldsMissingFrom(injected, 'assets'),
+      MISSING_FIELD_MESSAGE('assets', 'assets: {}'),
+    ).toEqual([]);
+  });
+
+  it('every injected document literal declares `styles`', () => {
     // The M23 hole, and the same shape as the M6/M7 one in this file's header. `Document.styles`
     // is required, the fixture cast is unchecked, and all seventy literals written before format v5
     // had none of them. That stayed invisible only until `applyStyleSheet` reached the render path
@@ -243,10 +295,13 @@ describe('injected document fixtures', () => {
     //
     // `styles: []` is the right default rather than a sentinel: a document with no style
     // definitions is an ordinary document, and it is what the factory produces.
-    expect(fieldsMissingFrom(literals, 'styles'), MISSING_FIELD_MESSAGE('styles', 'styles: []')).toEqual([]);
+    expect(
+      fieldsMissingFrom(injected, 'styles'),
+      MISSING_FIELD_MESSAGE('styles', 'styles: []'),
+    ).toEqual([]);
   });
 
-  it('every document literal declares a page setup unit of its own', () => {
+  it('every injected document literal declares a page setup unit of its own', () => {
     // The M24 hole, and the third time this file has had to be extended rather than the literals
     // repaired. `window.__P1_FIXTURE__` is handed to the store **verbatim**, so a fixture that predates
     // a required model field reaches the app without it -- there is no deserialiser in the path to
@@ -257,47 +312,57 @@ describe('injected document fixtures', () => {
     // Matched by position rather than by the word `unit`, because `defaultSize.unit` is the **page's**
     // unit and every fixture has one. Only a `unit` appearing before `defaultSize` is the page
     // setup's own, which is exactly the sibling relationship the model requires.
-    const missing: string[] = [];
-    for (const literal of literals) {
-      const source = readFileSync(literal.file, 'utf8');
-      // From `literal.after` -- just past this literal's own `pageSetup: {` -- to the next one. The
-      // other two field checks slice the same window for the same reason; starting the slice at
-      // `source.indexOf('pageSetup:', …)` instead would start at the *following* literal and check
-      // the wrong document, which is the version of this bug the file's own header warns about.
-      const next = source.indexOf('pageSetup:', literal.after);
-      const end = next === -1 ? source.length : next;
-      const statement = source.slice(literal.after, end);
-      const beforeDefault = statement.slice(0, statement.indexOf('defaultSize'));
-      if (/unit[ \t]*:/.test(beforeDefault)) continue;
-      const key = `${testRelativePath(literal.file)}:${literal.line}`;
-      if (DELIBERATELY_UNUNITED[key] !== undefined) continue;
-      missing.push(key);
-    }
     expect(
-      missing,
-      'these document literals declare no `pageSetup.unit`, so every measurement in this document ' +
-        'renders as NaNundefined. Add `unit: \'mm\'` alongside `fixedSize` -- ahead of `defaultSize`, ' +
-        'whose own `unit` is the page\'s and means something different.',
+      missingUnits(injected),
+      'these injected document literals declare no `pageSetup.unit`, so every measurement in this ' +
+        'document renders as NaNundefined. Add `unit: \'mm\'` alongside `fixedSize` -- ahead of ' +
+        '`defaultSize`, whose own `unit` is the page\'s and means something different.',
     ).toEqual([]);
   });
 
-  it('every unit exemption is still needed', () => {
-    // An exemption that outlives its reason is a hole with a comment on it. If one of those three
-    // documents is ever made current-version -- or is ever injected rather than loaded -- this fails
-    // and the entry has to go, which is the point of writing it down at all.
-    const live = new Set(missingUnits(literals));
-    const stale = Object.keys(DELIBERATELY_UNUNITED).filter((key) => !live.has(key));
+  it('no loaded document claims a version that carries the field and omits it', () => {
+    // The other half of the same contract, for the class that bypasses nothing.
+    //
+    // A **loaded** document goes through the deserialiser, so it does not need the field spelled out
+    // -- `version6-units.test.ts` covers that path, including the migration that supplies it for
+    // anything older than v6. What it must not do is *claim* v6 and then omit it: the deserialiser
+    // will refuse such a file, which is correct, but a fixture that means to load will not, and the
+    // failure it produces is a refusal in a test about something else entirely.
+    //
+    // That is not hypothetical. `snap.spec.ts` carried a v3 document with `pageSetup.unit` written
+    // in, which v3 does not have -- so the test passed while refusing for a second, un-named
+    // reason, and reading it gave no hint that a field it did not mention was also wrong.
+    //
+    // The threshold is `pageSetupKeysFor` rather than a literal, so this cannot go stale when the
+    // format version moves: whatever version first required the field is the one that matters.
+    const required = pageSetupKeysFor(CURRENT_FORMAT_VERSION).includes('unit');
     expect(
-      stale,
-      'these literals are exempt from the page-setup `unit` rule but now declare one, so the ' +
-        'exemption is dead weight. Delete the entry and the literal goes under the rule.',
-    ).toEqual([]);
+      required,
+      'the current format version no longer carries `pageSetup.unit`; if that is deliberate, this ' +
+        'rule and the migration it describes need rewriting together, not silently weakening',
+    ).toBe(true);
+    const wrong: string[] = [];
+    for (const literal of loaded) {
+      if (literal.version === null) continue;
+      if (pageSetupKeysFor(literal.version).includes('unit') === false) continue;
+      if (missingUnits([literal]).length === 0) continue;
+      wrong.push(
+        `${testRelativePath(literal.file)}:${literal.line} declares ` +
+          `formatVersion ${literal.version}, which requires pageSetup.unit, and omits it`,
+      );
+    }
+    expect(wrong).toEqual([]);
   });
 
   it('every page literal declares its own `size`', () => {
     // The M20 hole. `Page.size` is required, so a page without one throws during the first
     // render and the app never reaches `boot:complete` -- which is what made seven of these
     // surface as 83 identical timeouts across four unrelated specs.
+    //
+    // Deliberately **not** scoped to injected literals, unlike the field rules above: a loaded
+    // document's page with no `size` is a case the deserialiser *migrates* rather than refuses
+    // (ADR 0019 gave `defaultSize` to pre-v4 documents), and a page still needs a `size` after
+    // that. So the requirement holds for both deliveries and the exemption list stays per-file.
     const missing: string[] = [];
     for (const file of SOURCES) {
       if (DELIBERATELY_UNSIZED[testRelativePath(file)] !== undefined) continue;
