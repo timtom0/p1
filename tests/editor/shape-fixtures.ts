@@ -40,7 +40,7 @@ export const SHAPES = `() => {
 
   return {
     formatVersion: 3, id: 'shapes', name: 'Shapes',
-    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{
@@ -129,7 +129,7 @@ export const SHAPES = `() => {
  */
 export const EMPTY_PAGE = `() => ({
   formatVersion: 3, id: 'empty', name: 'Empty',
-  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -143,7 +143,7 @@ export const EMPTY_PAGE = `() => ({
 /** `EMPTY_PAGE` with one stroked rectangle, for inspector and multi-select tests. */
 export const TWO_RECTS = `() => ({
   formatVersion: 3, id: 'two', name: 'Two',
-  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{

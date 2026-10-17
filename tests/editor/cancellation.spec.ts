@@ -496,7 +496,7 @@ const CANCEL_FIXTURE = `() => {
   });
   return {
     formatVersion: 3, id: 'cancel', name: 'Cancel',
-    pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+    pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
     styles: [],
     assets: {},
     pages: [{

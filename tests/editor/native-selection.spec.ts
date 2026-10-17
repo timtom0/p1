@@ -55,7 +55,7 @@ import { mountFixture } from '../visual/harness';
  */
 const FIXTURE = `() => ({
   formatVersion: 3, id: 'f', name: 'F',
-  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{

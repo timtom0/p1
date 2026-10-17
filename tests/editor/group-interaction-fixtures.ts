@@ -23,7 +23,7 @@ import { mountFixture } from '../visual/harness';
 /** Three rects: `a` top-left, `b` top-right, `c` below `a`. */
 const THREE_RECTS = `() => ({
   formatVersion: 3, id: 'gdoc', name: 'Groups',
-  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{
@@ -53,7 +53,7 @@ const THREE_RECTS = `() => ({
 /** `THREE_RECTS` with `a` and `b` already wrapped in a group, authored at the transparent frame. */
 const GROUPED = `() => ({
   formatVersion: 3, id: 'gdoc', name: 'Groups',
-  pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+  pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 400, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
   styles: [],
   assets: {},
   pages: [{

@@ -87,34 +87,40 @@ export function isMeasurementUnit(value: string): value is MeasurementUnit {
 /**
  * Decimal places shown for a value in `unit`.
  *
- * ## Derived from the pixel, not chosen for looks
+ * ## The shape: the coarse unit gets more decimals than the fine one
  *
- * This editor's geometry is a raster: 96 CSS px per inch. A displayed digit is worth showing only if
- * it is worth at least one device pixel at 1:1, because below that it is noise the user cannot act
- * on. The quantum of `unit` in px is `96 / unitsPerInch(unit)`, and the table below is the smallest
- * number of decimals that keeps it at or above a tenth of a pixel.
+ * That is the part that matters and the part every "always two decimals" default gets backwards. A
+ * value in inches is small (`8.5`) and needs more decimals to say anything; a value in points is
+ * large (`595`) and needs fewer to say the same thing. Scribus's `unitGetPrecisionFromIndex` has the
+ * same shape -- in 4, pt 2 -- and this table is the same shape with fewer digits.
  *
- * That is why millimetres and centimetres get two and inches get three: 0.01mm is 0.038px, which is
- * finer than a pixel but still the finest increment a person types, while 0.01in is 0.96px, which is
- * a *visible* difference. Points get one decimal for the same reason at the other end — 0.1pt is
- * 0.13px, and a second decimal would be 0.013px.
+ * ## Why two, and why inches three
  *
- * ## A deliberate deviation from Scribus
+ * Two decimals is the smallest number that round-trips a typical value through the field without
+ * loss: 40px is 30.75pt, and one decimal would show `30.8` and store back 41.07. That was not a
+ * hypothetical -- it broke about a dozen editor assertions before this was corrected, and the
+ * symptom was a measurement off by 0.07px rather than anything recognisable as a unit bug.
  *
- * Scribus displays more: `unitGetPrecisionFromIndex` in `scribus/units.cpp` gives pt 2, mm 3, in 4,
- * p 2, cm 4. Those numbers are chosen for *editing* precision — letting a user type a very fine
- * correction and have it stick — rather than for legibility of what is on screen. Rotulus is a
- * fixed-frame renderer, so the pixel is the meaningful quantum and the table is derived from it
- * rather than copied. The shape of the two tables agrees: the coarse unit gets more decimals than
- * the fine one, and the direction is the one a naive "always two decimals" gets backwards.
+ * Inches get three because a page dimension is the one measurement where a hundredth of an inch is
+ * routinely meaningful -- a bleed offset, a trim -- and because `8.5` needs the digits to say
+ * anything at all.
+ *
+ * ## What this deliberately does not do
+ *
+ * It does not derive precision from the pixel. The tempting rule -- show the finest increment worth
+ * at least a tenth of a pixel -- gives millimetres two decimals and points **one**, because 0.1pt is
+ * 0.13px. That rule is self-consistent and it is wrong: it makes the displayed value unable to
+ * represent the document's own geometry, and a field whose reading cannot be written back is a
+ * field that cannot be edited. Legibility is bounded below by *round-trippability*, not only by the
+ * raster.
  */
 export const PRECISION_BY_UNIT: Readonly<Record<Unit, number>> = {
   mm: 2,
   cm: 2,
   in: 3,
-  pt: 1,
+  pt: 2,
   pc: 2,
-  px: 1,
+  px: 2,
 };
 
 /** Convert a length expressed in `unit` to CSS pixels. */

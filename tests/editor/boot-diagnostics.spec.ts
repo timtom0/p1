@@ -120,7 +120,7 @@ test.describe('the counts are named for what they count', () => {
       page,
       `() => ({
         formatVersion: 3, id: 'diag', name: 'Diag',
-        pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+        pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 300, height: 200, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
         styles: [],
         assets: {},
         pages: [{

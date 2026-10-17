@@ -261,7 +261,7 @@ test.describe('save and reopen', () => {
     // depends on it: the document is saved from the running app like any other.
     const source = `() => ({
       formatVersion: 3, id: 'multi', name: 'Multi',
-      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [
@@ -340,7 +340,7 @@ test.describe('save and reopen', () => {
   }) => {
     const source = `() => ({
       formatVersion: 3, id: 'kinds', name: 'Kinds',
-      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
@@ -382,7 +382,7 @@ test.describe('save and reopen', () => {
   test('transformed objects round-trip, including rotation and scale', async ({ browser }) => {
     const source = `() => ({
       formatVersion: 3, id: 'xf', name: 'Transformed',
-      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
+      pageSetup: { fixedSize: true, unit: 'pt', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {},
       pages: [{ id: 'p1', name: '1', size: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, background: { type: 'solid', color: '#ffffff' }, objects: [
@@ -494,9 +494,11 @@ test.describe('assets', () => {
       formatVersion: 5,
       id: 'doc_ext',
       name: 'External',
-      pageSetup: { fixedSize: true, unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       // Format 5, like every other loaded document here: this one is parsed, not injected, so its
-      // version is load-bearing and styles is a field it must declare.
+      // version is load-bearing. That is also why the page setup carries **no** `unit`: M24 added it
+      // in v6, `pageSetupKeysFor(5)` refuses one by name, and reading the absence as the migration
+      // default is the whole of the migration. So this document exercises it.
+      pageSetup: { fixedSize: true, defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' }, resizeBehaviour: 'crop' },
       styles: [],
       assets: {
         asset_x: {
@@ -577,9 +579,10 @@ test.describe('refused documents', () => {
       formatVersion: 5,
       id: 'doc_1',
       name: 'Base',
+      // No unit: this is a v5 document opened through the loader, and M24 put the field in v6.
       pageSetup: {
         fixedSize: true,
-        unit: 'mm', defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
+        defaultSize: { width: 450, height: 300, unit: 'pt', orientation: 'portrait' },
         resizeBehaviour: 'crop',
       },
       styles: [],
